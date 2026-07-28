@@ -1,0 +1,10 @@
+json5
+json-repair
+
+pydantic-ai-slim[openai]==1.86.0
+
+# Gepa and dependencies
+# litellm
+# botocore # so litellm stops complaining all the time
+litellm
+gepa
