@@ -1,0 +1,23 @@
+FROM python:3.12
+ARG NODE_VERSION=24
+
+RUN useradd -ms /bin/bash optimus
+WORKDIR /home/optimus
+USER optimus
+
+# install nvm
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.6/install.sh | bash
+# set env
+ENV NVM_DIR=/home/optimus/.nvm
+# install node
+RUN bash -c "source $NVM_DIR/nvm.sh && nvm install $NODE_VERSION"
+
+COPY ./requirements.txt ./requirements.txt
+RUN python3 -m pip install -r requirements.txt
+COPY ./src ./src
+COPY ./optimus.py ./optimus.py
+COPY ./test_optimus.py ./test_optimus.py
+COPY ./mcp_config.json ./mcp_config.json
+
+# set ENTRYPOINT for unit testing
+ENTRYPOINT ["python3", "-m", "pytest"]
