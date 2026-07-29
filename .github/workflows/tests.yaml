@@ -1,0 +1,52 @@
+name: Unit testing for Optimus
+
+# events that trigger jobs
+on:
+  push:
+    branches: [dev, main]
+
+# groups a set of actions that will be executed
+# jobs run in parallel by default, unless a job "needs" another job
+jobs:
+  test_optimus:
+    # needs: some_other_job
+    runs-on: ubuntu-latest
+    # container:
+    #   image: node:18
+      # env:
+      #   NODE_ENV: development
+      # ports:
+      #   - 80
+      # volumes:
+      #   - my_docker_volume:/volume_mount
+      # options: --cpus 1
+
+    # BACKGROUND SERVICES AVAILABLE FOR THIS JOB
+    # services:
+    #   image: nginx:18
+      # env:
+      #   NODE_ENV: development
+      # ports:
+      #   - 80
+      # volumes:
+      #   - my_docker_volume:/volume_mount
+      # options: --cpus 1
+
+    # each step can import from a pre-existing action on GitHub, or can be a new action from scratch
+    # each step builds on the previous one
+    # steps run sequentially
+    steps:
+    # this is normally always present and ensure your app's repo itself is loaded
+    - uses: actions/checkout@v2
+    - name: Build Optimus image with dependencies
+      run: |
+        docker build -t 9xeb/optimus:test . -f Dockerfile.test
+    - name: Run unit testing via docker image
+      run: |
+        docker run --rm \
+        -e OPENAI_API_BASE=http://127.0.0.1:8080 \
+        -e OPENAI_API_KEY=1234 \
+        -e OPENAI_API_MODEL=openai/local \
+        -e MCP_CONFIG=/home/optimus/mcp_config.json \
+        9xeb/optimus:test
+

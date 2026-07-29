@@ -14,7 +14,7 @@ class TestGepa:
         Test GepaWrapper constructor
         """
         assert GepaWrapper(
-            model_string="openai/test",
+            # model_string="openai/test",
             objective="Write a python test function",
             debug=True
         )
