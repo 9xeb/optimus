@@ -1,0 +1,9 @@
+services:
+  optimus:
+    build: .
+    environment:
+      OPENAI_API_BASE: http://127.0.0.1:8080/v1
+      OPENAI_API_KEY: 1234
+      OPENAI_API_MODEL: openai/local
+      MCP_CONFIG: "/home/optimus/mcp_config.json"
+    network_mode: "host"
