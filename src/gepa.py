@@ -4,6 +4,7 @@ import logging
 from gepa.optimize_anything import optimize_anything, GEPAConfig, EngineConfig, ReflectionConfig
 from gepa.utils import NoImprovementStopper, ScoreThresholdStopper  
 from pydantic_ai import Tool
+from pydantic_ai.models.function import _estimate_usage
 
 from src.agent import AgentWrapper
 from src.utils import initialize_openai_client, stabilize_json
@@ -14,21 +15,20 @@ logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 logging.getLogger("litellm").setLevel(logging.WARNING)
 
 class GepaWrapper:
-    def __init__(self, model_string: str, objective: str, debug: bool = False):
-        self.CONCISION_CLAUSE = """WARNING: generate just the amount of words necessary. Avoid repetitions and verbose instructions. Do not include information that you would otherwise be able to infer."""
-        # self.CONCISE_PROMPT = 'WARNING: generate just the least amount of words necessary. Fully adhere to this "minimum viable words" principle".'
+    def __init__(self, model_string: str, objective: str, seed: str = None, debug: bool = False):
+        self.concision_clause = """
+        WARNING: generate just the amount of words necessary. Avoid repetitions and verbose instructions. Do not include information that you would otherwise be able to infer.
+        """
         # Model string in format 'openai/unsloth/gemma-4-E4B-it-GGUF:Q4_K_M'
         self.model_string = model_string
-        self.objective = objective + "\n" + self.CONCISION_CLAUSE
-        # self.objective = objective
+        self.objective = objective + "\n" + self.concision_clause
+        self.seed_candidate = seed
         self.agent_cache = {}
         self.debug = debug
         self.client = initialize_openai_client(model_string)
-        # self.run_dir = './.optimus'
+        # self.run_dir = './.optimus'         # Where GEPA state will be stored
 
-
-        # self.artifact = "..."
-        # self.artifact = objective
+        self.token_count = 0
 
     # def steer(self, criteria: list[str]):
     def optimize(self):
@@ -48,35 +48,30 @@ class GepaWrapper:
         def evaluate_configuration(candidate: str):
             log_request(f"[REFLECTION] - {candidate}")
             try:
-                agent = AgentWrapper(self.model_string, self.debug)
+                agent = AgentWrapper(lm=self.model_string, debug=self.debug)
 
                 # 1. Deploy candidate in the environment and store results
                 log_internal_event("[EVALUATOR] - Running draft...")
-                _, evaluation_result, self.agent_cache = agent.step(
+                evaluation_new_messages, evaluation_result, self.agent_cache = agent.step(
                     task="",
                     response_format="",
                     user_prompt=candidate,
                     # tools=[],
-                    debug=self.debug,
+                    # debug=self.debug,
                     cache=self.agent_cache
                 )
-                log_response(f"[EVALUATOR] - {evaluation_result[:200]}...")
-                # user_prompt = {
-                #     "objective": self.objective,
-                #     "response": evaluation_result,
-                #     # "criteria": example["criteria"],
-                # }
-                # log_internal_event(f"GEPA EVALUATION CANDIDATE - {user_prompt}")
-
+                evaluation_token_usage = _estimate_usage(evaluation_new_messages)
+                self.token_count += evaluation_token_usage.input_tokens + evaluation_token_usage.output_tokens
+                log_response(f"[EVALUATOR] - RESULTS - {evaluation_result[:50]}...(more)")
+                
                 # 2. Judge the result of a candidate
                 log_internal_event("[JUDGE] - Judging draft evaluation...")
-                _, feedback, self.agent_cache = agent.step(
-                    # task="Rate how well the solution attempt achieves the goal. Criticize possible flaws.",
-                    task="Criticize the proposed solution attempt.",
+                judge_new_messages, feedback, self.agent_cache = agent.step(
+                    task="Criticize the proposed solution attempt. Focus on missing or wrong points that violate the goal.",
                     # task="Grill the proposed solution attempt.",
-                    response_format=f"""
+                    response_format="""
                     Output format in JSON:
-                    {{"score_explanation": "...", "score": "between 0 and 100"}}
+                    {{"critique": "...", "score": "between 0 and 100"}}
                     Return ONLY valid JSON.
                     Escape all quotes inside string values.
                     Escape all backslashes.
@@ -90,38 +85,43 @@ class GepaWrapper:
                     {evaluation_result}
                     """,
                     tools=[
-                        Tool(ask_user, takes_ctx=False, metadata={'read_only': True})
+                        # Tool(ask_user, takes_ctx=False, metadata={'read_only': True})
                     ],
                     # declarative_tools={},
                     # toolsets={},
                     # history=past_history,
-                    debug=self.debug,
+                    # debug=self.debug,
                     cache=self.agent_cache,
                     # Use needs and tools to hit in cache same condition checking with same context, efficiently
                     # metadata={"needs": procedure.needs, "tools": procedure.tools}
                 )
+                judge_token_usage = _estimate_usage(judge_new_messages)
+                self.token_count += judge_token_usage.input_tokens + judge_token_usage.output_tokens
                 log_response(f"[JUDGE] - {feedback}")
-                # Stabilize JSON feedback from LLM
+
+                # 3. Stabilize JSON feedback from LLM
                 stable_feedback = stabilize_json(
                     unstable_string = feedback,
-                    expected_keys = ["score_explanation"]
+                    # expected_keys = ["score_explanation"]
+                    # expected_keys = ["pros","cons"]
+                    expected_keys = ["critique"]
                 )
                 score = float(stable_feedback["score"])
                 log_internal_event(f"CONFIRMED CANDIDATE SCORE - {score}")
-                # Return score and ASI
+                # 4. Return score and ASI
                 return score, {
                     "scores": {
                         "score": score
                     },
                     "artifact": candidate,
-                    "feedback": stable_feedback["score_explanation"]
+                    "feedback": stable_feedback
                 }
             except Exception as e:
                 log_error(f"CRITICAL ERROR - GEPA STEP FAILED - {e}")
                 # raise e
-                return 50.0, {
+                return 0.0, {
                     "scores": {
-                        "score": 50.0
+                        "score": 0.0
                     },
                     "artifact": candidate,
                     "feedback": f"Provided JSON is malformed. Hint to fix: {e}"
@@ -140,6 +140,7 @@ class GepaWrapper:
         gepa_results = self.opinionated_optimize_anything(
             evaluator=evaluate_configuration,
             objective=f"Generate an LLM prompt to fulfill the following task: {self.objective}",
+            seed_candidate=self.seed_candidate,
             # criteria=criteria,
             # seed=self.artifact
         )
@@ -150,6 +151,7 @@ class GepaWrapper:
         self,
         evaluator,
         objective: str,
+        seed_candidate: str = None,
         # criteria: list = None
     ):
         """
@@ -174,6 +176,7 @@ class GepaWrapper:
             # dataset=criteria if criteria is not None else [],
             # valset=criteria,                      # test against this set of criteria
             objective=objective,
+            seed_candidate=seed_candidate,
             config=GEPAConfig(
                 engine=EngineConfig(
                     frontier_type="instance",
@@ -182,17 +185,18 @@ class GepaWrapper:
                     parallel=False,
                     cache_evaluation=True,                       # Reuse redundant evaluations
                     raise_on_exception=True,                     # Continue on errors instead of stopping
-                    # run_dir=self.run_dir,
+                    # run_dir=self.run_dir,                        # Persistent GEPA state
                     display_progress_bar=True,
                 ),
                 reflection=ReflectionConfig(
                     reflection_lm=self.model_string,
-                    reflection_minibatch_size=2,      # Reduce from default 3 to lower memory usage
-                    #skip_perfect_score=True          # Skip unnecessary evaluations
+                    reflection_minibatch_size=1,      # Reduce from default 3 to lower memory usage
+                    perfect_score=100.0,
+                    skip_perfect_score=True           # Skip unnecessary evaluations
                 ),
                 stop_callbacks=[
-                    NoImprovementStopper(max_iterations_without_improvement=2),  # Stop when plateau
-                    ScoreThresholdStopper(100)                                   # Stop when perfect
+                    NoImprovementStopper(max_iterations_without_improvement=10),  # Stop when plateau
+                    ScoreThresholdStopper(100)                                    # Stop when perfect
                 ]
             )
         )

@@ -160,7 +160,7 @@ class AgentWrapper:
         tools: list[Tool] = None,
         # toolsets: dict[str, MCPServerStreamableHTTP] = None,
         history: list[ModelMessage] = None,
-        debug: bool = False,
+        # debug: bool = False,
         cache: dict = None,
         ignore_cache: bool = False,
         metadata: dict = None
@@ -209,17 +209,18 @@ class AgentWrapper:
                     with disable_threads():
                         try: 
                             result = agent.run_sync(
-                                user_prompt="""
+                                user_prompt=f"""
                                 {user_prompt}
 
                                 {response_format}
-                                """.format(response_format=response_format, user_prompt=user_prompt),
+                                """,
                                 message_history=history,
                                 deps=self.deps,
                                 usage_limits=UsageLimits(tool_calls_limit=20)
                             )
                         except ModelHTTPError as e:
                             # Fall back to empty response
+                            log_error(f"Model HTTP Error: {e}")
                             return [], "", cache
                     break
                 except Exception as e:
