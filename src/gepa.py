@@ -1,5 +1,5 @@
-import json
 import logging
+import os
 
 from gepa.optimize_anything import optimize_anything, GEPAConfig, EngineConfig, ReflectionConfig
 from gepa.utils import NoImprovementStopper, ScoreThresholdStopper  
@@ -15,17 +15,18 @@ logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 logging.getLogger("litellm").setLevel(logging.WARNING)
 
 class GepaWrapper:
-    def __init__(self, model_string: str, objective: str, seed: str = None, debug: bool = False):
+    def __init__(self, objective: str, seed: str = None, debug: bool = False):
         self.concision_clause = """
         WARNING: generate just the amount of words necessary. Avoid repetitions and verbose instructions. Do not include information that you would otherwise be able to infer.
         """
         # Model string in format 'openai/unsloth/gemma-4-E4B-it-GGUF:Q4_K_M'
-        self.model_string = model_string
+        # self.model_string = model_string
+        self.model_string = os.environ["OPENAI_API_MODEL"]
         self.objective = objective + "\n" + self.concision_clause
         self.seed_candidate = seed
         self.agent_cache = {}
         self.debug = debug
-        self.client = initialize_openai_client(model_string)
+        self.client = initialize_openai_client(self.model_string)
         # self.run_dir = './.optimus'         # Where GEPA state will be stored
 
         self.token_count = 0
@@ -39,12 +40,10 @@ class GepaWrapper:
 
         def ask_user(question: str):
             """
-            Ask clarifications to the user.
+            Ask guidance to the user.
             """
             return input(f"{question}\n")
 
-        # def evaluate_configuration(candidate: str, example):
-        # def evaluate_configuration(candidate: str, example):
         def evaluate_configuration(candidate: str):
             log_request(f"[REFLECTION] - {candidate}")
             try:
@@ -85,7 +84,7 @@ class GepaWrapper:
                     {evaluation_result}
                     """,
                     tools=[
-                        # Tool(ask_user, takes_ctx=False, metadata={'read_only': True})
+                        Tool(ask_user, takes_ctx=False, metadata={'read_only': True})
                     ],
                     # declarative_tools={},
                     # toolsets={},
@@ -186,7 +185,7 @@ class GepaWrapper:
                     cache_evaluation=True,                       # Reuse redundant evaluations
                     raise_on_exception=True,                     # Continue on errors instead of stopping
                     # run_dir=self.run_dir,                        # Persistent GEPA state
-                    display_progress_bar=True,
+                    # display_progress_bar=True,
                 ),
                 reflection=ReflectionConfig(
                     reflection_lm=self.model_string,

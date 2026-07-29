@@ -1,6 +1,6 @@
 import hashlib
 import pickle
-
+import os
 from typing import Any, Optional, Self
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -10,7 +10,7 @@ from pydantic_ai.capabilities import Hooks
 from pydantic_ai._utils import disable_threads
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ToolCallPart
-# from pydantic_ai.mcp import MCPServerStreamableHTTP
+from pydantic_ai.mcp import load_mcp_servers
 
 from src.utils import initialize_openai_client
 from src.log import log_tool_request, log_error, log_internal_event, log_request, log_part, log_tool_response
@@ -132,7 +132,7 @@ async def log_after_response(ctx: RunContext[AgentDeps], *, request_context, res
     except Exception as e:
         log_error(f"{ctx.deps.log_prefix} - after_model_request hook error: {e}")
     return response
-  
+
 # Error handling
 @hooks.on.tool_execute_error
 async def log_tool_error(ctx: RunContext[AgentDeps], *, call, tool_def, args, error):
@@ -151,6 +151,7 @@ class AgentWrapper:
             verbose=debug,
             tool_approval_function=default_tool_approval_function
         )
+        self.mcp_toolsets = load_mcp_servers(os.environ["MCP_CONFIG"])
 
     def step(
         self,
@@ -198,7 +199,7 @@ class AgentWrapper:
                 model=self.client,
                 system_prompt=task,
                 tools=tools,
-                # toolsets=[toolsets[toolset_name] for toolset_name in toolsets],
+                toolsets=self.mcp_toolsets,     # Additional tools provided by mcp_config.json
                 capabilities=[hooks],
                 deps_type=AgentDeps
             )
