@@ -8,3 +8,5 @@ pydantic-ai-slim[openai]==1.86.0
 # botocore # so litellm stops complaining all the time
 litellm
 gepa
+
+pytest
