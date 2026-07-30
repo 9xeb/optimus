@@ -1,4 +1,5 @@
 import hashlib
+import json
 import pickle
 import os
 from typing import Any, Optional, Self
@@ -151,7 +152,7 @@ class AgentWrapper:
             verbose=debug,
             tool_approval_function=default_tool_approval_function
         )
-        self.mcp_toolsets = load_mcp_servers(os.environ["MCP_CONFIG"])
+        self.mcp_toolsets = load_mcp_servers(os.environ["MCP_CONFIG"]) if os.environ.get("MCP_CONFIG") else []
 
     def step(
         self,
@@ -234,3 +235,15 @@ class AgentWrapper:
                 "output": result.output,
             }
         return cache[input_hash]["new_messages"], cache[input_hash]["output"], cache
+
+    def list_tool_calls(self, messages: list[ModelMessage]):
+        tool_calls = [
+            {
+                "name": part.tool_name,
+                "args": json.loads(part.args)
+            }
+            for message in messages
+            for part in message.parts
+            if part.part_kind == "tool-call"
+        ]
+        return tool_calls

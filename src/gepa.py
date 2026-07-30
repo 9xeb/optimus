@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 
@@ -38,9 +39,10 @@ class GepaWrapper:
         Evolution is powered by GEPA's optimize_anything function.
         """
 
-        def ask_user(question: str):
+        def ask_question(question: str):
             """
-            Ask guidance to the user.
+            Always ask questions when the proposed solution made assumptions that are not clear in the objective.
+            The response to the question is authoritative and can steer the feedback.
             """
             return input(f"{question}\n")
 
@@ -62,7 +64,9 @@ class GepaWrapper:
                 evaluation_token_usage = _estimate_usage(evaluation_new_messages)
                 self.token_count += evaluation_token_usage.input_tokens + evaluation_token_usage.output_tokens
                 log_response(f"[EVALUATOR] - RESULTS - {evaluation_result[:50]}...(more)")
-                
+                evaluation_tool_calls = agent.list_tool_calls(evaluation_new_messages)
+                log_response(f"[EVALUATOR] - CALLS - {json.dumps(evaluation_tool_calls)}]")
+
                 # 2. Judge the result of a candidate
                 log_internal_event("[JUDGE] - Judging draft evaluation...")
                 judge_new_messages, feedback, self.agent_cache = agent.step(
@@ -81,10 +85,13 @@ class GepaWrapper:
                     {self.objective}
 
                     # SOLUTION ATTEMPT
+                    ## TOOLS CALLED
+                    {json.dumps(evaluation_tool_calls)}
+                    ## RESPONSE
                     {evaluation_result}
                     """,
                     tools=[
-                        Tool(ask_user, takes_ctx=False, metadata={'read_only': True})
+                        Tool(ask_question, takes_ctx=False, metadata={'read_only': True})
                     ],
                     # declarative_tools={},
                     # toolsets={},
