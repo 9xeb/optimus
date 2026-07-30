@@ -1,5 +1,7 @@
-## Optimus - The science of prompt engineering.
+## Optimus - The science of prompt engineering
 Optimus accelerates continuous, evidence-driven design of LLM instructions to achieve specified goals. For agentic goals, Optimus can be configured to experiment on your test environment via MCP servers. Humans retain ownership of the goals.
+
+Give Optimus a goal and it will explore different prompts that could achieve the goal, then choose the prompt that performed best.
 
 Powered by GEPA[[1]][GEPA] and LLMs. Optimize those prompts with science and automation.
 
