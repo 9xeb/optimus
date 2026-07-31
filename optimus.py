@@ -1,5 +1,20 @@
 import argparse
+# from alive_progress import alive_it, alive_bar
 from src.gepa import GepaWrapper
+
+
+# import time
+# import random
+# # bar = alive_it(
+# #     it=[1,2,3,4,5,6,7,8,9,0],
+# #     total=100,
+# #     manual=True
+# # )
+# with alive_bar(100, manual=True) as bar:
+#     for i in [1,2,3,4,5,6,7,8,9,0]:
+#         bar.text(f"Number is {i}")
+#         time.sleep(2)
+#         bar(random.random())
 
 parser = argparse.ArgumentParser(
     prog="optimus",
@@ -24,15 +39,16 @@ else:
     seed = None
 optimus = GepaWrapper(
     # model_string=args.model,
-    objective=input("GOAL > "),
+    objective=input(""),
     seed=seed if seed and len(seed) > 0 else None
     # debug=True
 )
-optimized_artifact = optimus.optimize()
+best_artifact, best_score = optimus.optimize()
 print("#########################################")
-print(optimized_artifact)
+print(best_artifact)
 print("#########################################")
 print(f"Tokens spent on evaluations: {optimus.token_count}")
+print(f"Best score: {best_score}/100.0")
 if args.file:
     with open(args.file, 'w', encoding="utf-8") as f:
-        print(optimized_artifact, file=f)
+        print(best_artifact, file=f)

@@ -11,3 +11,5 @@ litellm
 gepa
 
 pytest
+
+alive-progress
