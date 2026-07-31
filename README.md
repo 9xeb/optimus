@@ -6,7 +6,7 @@ Give Optimus a goal and it will explore different prompts that could achieve the
 Start from scratch:
 ![Start from scratch](docs/scratch.gif)
 Or refine/pivot existing instructions:
-![Refine existing prompts](docs/scratch.gif)
+![Refine existing prompts](docs/steer.gif)
 
 
 Powered by GEPA[[1]][GEPA] and LLMs. Optimize those prompts with science and automation.
