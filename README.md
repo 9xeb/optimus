@@ -3,6 +3,12 @@ Optimus accelerates continuous, evidence-driven design of LLM instructions to ac
 
 Give Optimus a goal and it will explore different prompts that could achieve the goal, then choose the prompt that performed best.
 
+Start from scratch:
+![Start from scratch](docs/scratch.gif)
+Or refine/pivot existing instructions:
+![Refine existing prompts](docs/scratch.gif)
+
+
 Powered by GEPA[[1]][GEPA] and LLMs. Optimize those prompts with science and automation.
 
 ### Quickstart
@@ -23,7 +29,9 @@ Pure text optimization (no MCP):
 ```bash
 echo "Formal email for job application as DevOps engineer." | optimus -f EMAIL.txt
 # ... (you decide to steer the goal)
-echo "Remove Kubernetes and add Nomad." | optimus -f EMAIL.txt
+echo "Replace Kubernetes with Nomad." | optimus -f EMAIL.txt
+# ... (you change your mind)
+echo "Insert AWS, GCP and Azure." | optimus -f EMAIL.txt
 ```
 Agentic:
 ```bash
