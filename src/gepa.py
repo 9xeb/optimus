@@ -65,7 +65,7 @@ class GepaWrapper:
                 self.token_count += evaluation_token_usage.input_tokens + evaluation_token_usage.output_tokens
                 log_response(f"[EVALUATOR] - RESULTS - {evaluation_result[:50]}...(more)")
                 evaluation_tool_calls = agent.list_tool_calls(evaluation_new_messages)
-                log_response(f"[EVALUATOR] - CALLS - {json.dumps(evaluation_tool_calls)}]")
+                log_response(f"[EVALUATOR] - TOOL CALLS - {json.dumps(evaluation_tool_calls)}]")
 
                 # 2. Judge the result of a candidate
                 log_internal_event("[JUDGE] - Judging draft evaluation...")
