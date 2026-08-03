@@ -1,7 +1,7 @@
 ## Optimus - The science of prompt engineering
-Optimus accelerates continuous, evidence-driven design of LLM instructions to achieve specified goals. For agentic goals, Optimus can be configured to experiment on your test environment via MCP servers. Humans retain ownership of the goals.
+Optimus accelerates continuous, evidence-driven design of LLM instructions to achieve specific goals. For agentic operations, Optimus can be configured to experiment on your test environment via MCP servers. Humans retain ownership of the goals.
 
-Give Optimus a goal and it will explore different prompts that could achieve the goal, then choose the prompt that performed best.
+Give Optimus a goal and it will explore different prompts that could achieve it, then choose the prompt that performed best.
 
 Start from scratch:
 ![Start from scratch](docs/scratch.gif)
@@ -45,7 +45,7 @@ Suppose your AI agent achieved the intended goal with no mistakes and no hiccups
 What if you could instead start from scratch and rely on an evidence-driven prompt search algorithm, that learned directly from you and the environment on which it is supposed to be deployed, with no additional structural overhead? Enter Optimus.
 
 At the heart of Optimus lies a multi-agent, evolutionary search loop.
-It starts with nothing but a given objective and an optional prompt draft to pick up from. It **runs** the prompt on your environment, **criticizes** the outcomes against the objective, and **reflects** on a new prompt to run. In between, GEPA **keeps** an evolutionary pool of least criticized prompts. Optimus stops when it either reaches a **plateau** in the optimization or it finds a prompt that yielded **perfect** results on your repeatable, test environment. Every time Optimus stops, you can steer the objective and watch it explore again.
+It starts with nothing but a given objective and an optional prompt draft to pick up from. It **runs** the prompt on your environment, **criticizes** the outcomes against the objective, and **reflects** on a new prompt to run. In between, GEPA **keeps** an evolutionary pool of least criticized prompts. Optimus stops when it either reaches a **plateau** in the optimization or it finds a prompt that yielded **perfect** results on your repeatable, test environment. Every time Optimus stops, you can steer the objective, fill the gaps, and watch it explore again.
 
 ### Why it works
 Instead of manually chasing outcomes, Optimus focuses on applying a scientific method to explore the prompts that might generate those outcomes. Anything that the LLM can infer at runtime is left to be inferred at runtime.
@@ -56,7 +56,7 @@ We are used to chatting with AI. On one side, conversations and prompt engineeri
  - conversational context size does not build up.
  - prompts are tested and scored in your (repeatable, test) environment before you receive an actual response.
 
-Focus is the objective. Persistency is in the prompt. Soundness is provided by your environment's feedback.
+Focus is the objective. Memory is in the prompt. Soundness is provided by your environment's feedback.
 
 <!-- ### Examples (code, email, memory, ...)
 Try out these goals
