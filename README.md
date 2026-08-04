@@ -40,12 +40,12 @@ echo "Find pod problems in the kubernetes cluster" | optimus -f TROUBLESHOOTING.
 ```
 
 ### How it works
-Suppose your AI agent achieved the intended goal with no mistakes and no hiccups, then look just one step back. All your AGENT.md, MEMORY.md, skills, tool signatures, RAG knowledge were merged into a single, final prompt. And that prompt got the job done. 
+Suppose your AI agent achieved the intended goal with no mistakes and no hiccups, then look just one step back. All your AGENT.md, MEMORY.md, skills, tool signatures, RAG knowledge, chat messages were merged into a single, final prompt. And that prompt got the job done. 
 
 What if you could instead start from scratch and rely on an evidence-driven prompt search algorithm, that learned directly from you and the environment on which it is supposed to be deployed, with no additional structural overhead? Enter Optimus.
 
 At the heart of Optimus lies a multi-agent, evolutionary search loop.
-It starts with nothing but a given objective and an optional prompt draft to pick up from. It **runs** the prompt on your environment, **criticizes** the outcomes against the objective, and **reflects** on a new prompt to run. In between, GEPA **keeps** an evolutionary pool of least criticized prompts. Optimus stops when it either reaches a **plateau** in the optimization or it finds a prompt that yielded **perfect** results on your repeatable, test environment. Every time Optimus stops, you can steer the objective, fill the gaps, and watch it explore again.
+It starts with nothing but a given objective and an optional prompt draft to pick up from. It **runs** the prompt on your environment, **criticizes** the outcomes against the objective, and **reflects** on a new prompt to run. In between, GEPA keeps an **evolutionary pool** of least criticized prompts. Optimus stops when it either reaches a **plateau** in the optimization or it finds a prompt that yielded **perfect** results on your repeatable, test environment. Every time Optimus stops, you can steer the objective, fill the gaps, and watch it explore again.
 
 ### Why it works
 Instead of manually chasing outcomes, Optimus focuses on applying a scientific method to explore the prompts that might generate those outcomes. Anything that the LLM can infer at runtime is left to be inferred at runtime.
