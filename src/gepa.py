@@ -17,16 +17,15 @@ logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 logging.getLogger("litellm").setLevel(logging.WARNING)
 
 class GepaWrapper:
-    def __init__(self, objective: str, seed: str = None, debug: bool = False):
+    def __init__(self, debug: bool = False):
         self.concision_clause = """
         (The prompt must only contain the amount of words necessary. Avoid repetitions and verbose instructions. Do not include information that you would otherwise be able to infer).
         """
         # Model string in format 'openai/unsloth/gemma-4-E4B-it-GGUF:Q4_K_M'
         # self.model_string = model_string
         self.model_string = os.environ["OPENAI_API_MODEL"]
-        self.objective = objective + ".\n" + self.concision_clause
         # self.objective = objective
-        self.seed_candidate = seed
+        # self.seed_candidate = seed
         self.agent_cache = {}
         self.debug = debug
         self.client = initialize_openai_client(self.model_string)
@@ -35,12 +34,15 @@ class GepaWrapper:
         self.token_count = 0
         self.best_score = 0
 
+        self.max_context_segment = 0
+
     # def steer(self, criteria: list[str]):
-    def optimize(self):
+    def optimize(self, objective: str, seed: str = None):
         """
         Apply criteria to artifact via evolutionary algorithms.
         Evolution is powered by GEPA's optimize_anything function.
         """
+        objective = objective + ".\n" + self.concision_clause
         titles = {
             "optimus": "[OPTIMUS] - Preparing experiments...",
             "evaluator": "[EVALUATOR] - Running instructions...",
@@ -71,23 +73,26 @@ class GepaWrapper:
                     # 1. Deploy candidate in the environment and store results
                     # log_internal_event("[EVALUATOR] - Running draft...")
                     progress_bar.title(titles["evaluator"])
-                    evaluation_new_messages, evaluation_result, self.agent_cache = agent.step(
+                    evaluation_new_messages, evaluation_result = agent.step(
                         task="",
                         response_format="",
                         user_prompt=candidate,
-                        # tools=[],
-                        # debug=self.debug,
-                        cache=self.agent_cache
+                        # tools=[],     # these are read by AgentWrapper class from MCP_CONFIG env var
                     )
-                    evaluation_token_usage = _estimate_usage(evaluation_new_messages)
-                    self.token_count += evaluation_token_usage.input_tokens + evaluation_token_usage.output_tokens
+
+                    # 2. Estimate token usage and track largest context segment
+                    evaluation_token_usage = _estimate_usage(evaluation_new_messages).input_tokens + _estimate_usage(evaluation_new_messages).output_tokens
+                    if evaluation_token_usage > self.max_context_segment:
+                        self.max_context_segment = evaluation_token_usage
+                    self.token_count += evaluation_token_usage
+
                     log_response(f"[EVALUATOR] - RESULTS - {evaluation_result[:50]}...(more)")
                     evaluation_tool_calls = agent.list_tool_calls(evaluation_new_messages)
                     log_response(f"[EVALUATOR] - TOOL CALLS - {json.dumps(evaluation_tool_calls)}]")
 
-                    # 2. Judge the result of a candidate
+                    # 3. Judge the result of a candidate
                     progress_bar.title(titles["judge"])
-                    judge_new_messages, feedback, self.agent_cache = agent.step(
+                    judge_new_messages, feedback = agent.step(
                         task="Criticize the proposed solution attempt at the goal. Focus on missing or wrong points that violate the goal.",
                         # task="Grill the proposed solution attempt.",
                         response_format="""
@@ -100,7 +105,7 @@ class GepaWrapper:
                         """,
                         user_prompt=f"""
                         # GOAL
-                        {self.objective}
+                        {objective}
 
                         # SOLUTION ATTEMPT
                         ## TOOLS CALLED
@@ -114,16 +119,12 @@ class GepaWrapper:
                         # declarative_tools={},
                         # toolsets={},
                         # history=past_history,
-                        # debug=self.debug,
-                        cache=self.agent_cache,
-                        # Use needs and tools to hit in cache same condition checking with same context, efficiently
-                        # metadata={"needs": procedure.needs, "tools": procedure.tools}
                     )
                     judge_token_usage = _estimate_usage(judge_new_messages)
                     self.token_count += judge_token_usage.input_tokens + judge_token_usage.output_tokens
                     log_response(f"[JUDGE] - {feedback[:50]}...(more)")
 
-                    # 3. Stabilize JSON feedback from LLM
+                    # 4. Stabilize JSON feedback from LLM
                     stable_feedback = stabilize_json(
                         unstable_string = feedback,
                         # expected_keys = ["score_explanation"]
@@ -132,8 +133,8 @@ class GepaWrapper:
                     )
                     score = float(stable_feedback["score"])
                     log_response(f"[JUDGE] - {score}/100.0")
-                    # log_internal_event(f"CONFIRMED CANDIDATE SCORE - {score}")
-                    # 4. Return score and ASI
+                    
+                    # 5. Return score and ASI
                     if score > self.best_score:
                         self.best_score = score
                         progress_bar(score/100.0)       # Update progress bar
@@ -165,15 +166,16 @@ class GepaWrapper:
             #     # Add old info criteria for repated nudges
             #     criteria+=[{"id": "Old Information", "criteria": f"Rate the presense of the following information: {self.artifact}"}]
 
-            # Optimize scopes configuration
+            # 2. Optimize from seed
             gepa_results = self.opinionated_optimize_anything(
                 evaluator=evaluate_configuration,
-                objective=f"Refine LLM instructions meant to fulfill the following task: {self.objective}",
-                seed_candidate=self.seed_candidate,
+                objective=f"Refine LLM instructions meant to fulfill the following task: {objective}",
+                seed_candidate=seed,
+                # seed_candidate=self.seed_candidate,
                 # criteria=criteria,
                 # seed=self.artifact
             )
-            # self.artifact = gepa_results.best_candidate         # Update artifact
+
             return gepa_results.best_candidate, gepa_results.val_aggregate_scores[gepa_results.best_idx]
 
     def opinionated_optimize_anything(
@@ -237,7 +239,7 @@ class GepaWrapper:
                 ]
             )
         )
-
+    
     # def human_gepa_prototyping():
     #     """
     #     Take the best from gepa_optimize_artifact and add human in the loop.

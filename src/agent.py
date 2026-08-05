@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from pydantic_ai import Agent, UsageLimits, ModelMessage, RunContext, ToolDefinition, Tool, SkipToolExecution
-from pydantic_ai.capabilities import Hooks
+from pydantic_ai.capabilities import Hooks, Thinking
 from pydantic_ai._utils import disable_threads
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ToolCallPart
@@ -145,8 +145,9 @@ async def log_tool_error(ctx: RunContext[AgentDeps], *, call, tool_def, args, er
 
 
 class AgentWrapper:
-    def __init__(self, lm: str, debug: bool = False):
+    def __init__(self, lm: str, thinking: bool = True, debug: bool = False):
         self.client = initialize_openai_client(lm)
+        self.thinking = thinking
         self.deps = AgentDeps(
             log_prefix="OPTIMUS -",
             verbose=debug,
@@ -154,18 +155,13 @@ class AgentWrapper:
         )
         self.mcp_toolsets = load_mcp_servers(os.environ["MCP_CONFIG"]) if os.environ.get("MCP_CONFIG") else []
 
-    def step(
+    async def async_step(
         self,
         task: str,
         response_format: str,
         user_prompt: str,
         tools: list[Tool] = None,
-        # toolsets: dict[str, MCPServerStreamableHTTP] = None,
         history: list[ModelMessage] = None,
-        # debug: bool = False,
-        cache: dict = None,
-        ignore_cache: bool = False,
-        metadata: dict = None
     ):
         """
         Args:
@@ -174,67 +170,183 @@ class AgentWrapper:
         Returns:
             current_history: the new messages generated right now
             result_output: the last message in the new messages
-            cache: dictionary to reuse inputs and outputs
-            ignore_cache: force token generation every time
-            metadata: metadata useful for matching caches without sharing history
         """
 
         tools = tools if tools is not None else []
-        cache = cache if cache is not None else []
         # Loop through prompts until it stops calling tools and gives a final answer
-        input_bundle = (
-            task,
-            response_format,
-            user_prompt,
-            metadata,
-            tuple([tool.name for tool in tools]),
-            # tuple([toolset_name for toolset_name in toolsets.keys()])
+
+        agent = Agent(
+            model=self.client,
+            system_prompt=task,
+            tools=tools,
+            toolsets=self.mcp_toolsets,     # Additional tools provided by mcp_config.json
+            capabilities=[
+                hooks,
+                Thinking(effort=self.thinking)
+            ],
+            deps_type=AgentDeps
         )
-        input_hash = hashlib.sha256(pickle.dumps(input_bundle)).hexdigest()
 
-        if input_hash not in cache.keys() or ignore_cache:
-            # if debug:
-            #     input("Debug agent_step")
+        try:
+            async with agent.run_stream(
+                user_prompt=f"""
+                {user_prompt}
+                {response_format}
+                """,
+                message_history=history,
+                deps=self.deps,
+                usage_limits=UsageLimits(tool_calls_limit=20)
+            ) as result:
+                async for text in result.stream_text():
+                    print(text)
+                # stream finished here, collect results
+                output = await result.get_output()
+                return result.new_messages(), output
+        except ModelHTTPError as e:
+            # Fall back to empty response
+            log_error(f"Model HTTP Error: {e}")
+            return [], ""
 
-            agent = Agent(
-                model=self.client,
-                system_prompt=task,
-                tools=tools,
-                toolsets=self.mcp_toolsets,     # Additional tools provided by mcp_config.json
-                capabilities=[hooks],
-                deps_type=AgentDeps
-            )
 
-            attempts=0
-            while True:
-                try:
-                    with disable_threads():
-                        try: 
-                            result = agent.run_sync(
-                                user_prompt=f"""
-                                {user_prompt}
+    def step(
+        self,
+        task: str,
+        response_format: str,
+        user_prompt: str,
+        tools: list[Tool] = None,
+        history: list[ModelMessage] = None,
+    ):
+        """
+        Args:
+            prefix: a prefix to add when logging
 
-                                {response_format}
-                                """,
-                                message_history=history,
-                                deps=self.deps,
-                                usage_limits=UsageLimits(tool_calls_limit=20)
-                            )
-                        except ModelHTTPError as e:
-                            # Fall back to empty response
-                            log_error(f"Model HTTP Error: {e}")
-                            return [], "", cache
+        Returns:
+            current_history: the new messages generated right now
+            result_output: the last message in the new messages
+        """
+
+        tools = tools if tools is not None else []
+        # Loop through prompts until it stops calling tools and gives a final answer
+
+        agent = Agent(
+            model=self.client,
+            system_prompt=task,
+            tools=tools,
+            toolsets=self.mcp_toolsets,     # Additional tools provided by mcp_config.json
+            capabilities=[
+                hooks,
+                Thinking(effort=self.thinking)
+            ],
+            deps_type=AgentDeps
+        )
+
+        attempts=0
+        while True:
+            try:
+                with disable_threads():     # disabling threads is necessary to have agent calls inside an agent tool
+                    try:
+                        result = agent.run_sync(
+                            user_prompt=f"""
+                            {user_prompt}
+                            {response_format}
+                            """,
+                            message_history=history,
+                            deps=self.deps,
+                            usage_limits=UsageLimits(tool_calls_limit=20)
+                        )
+                    except ModelHTTPError as e:
+                        # Fall back to empty response
+                        log_error(f"Model HTTP Error: {e}")
+                        return [], ""
                     break
-                except Exception as e:
-                    attempts+=1
-                    if attempts>3:
-                        raise e
-                    continue
-            cache[input_hash] = {
-                "new_messages": result.new_messages(),
-                "output": result.output,
-            }
-        return cache[input_hash]["new_messages"], cache[input_hash]["output"], cache
+            except Exception as e:
+                attempts+=1
+                if attempts>3:
+                    raise e
+                continue
+        return result.new_messages(), result.output
+
+    # def step(
+    #     self,
+    #     task: str,
+    #     response_format: str,
+    #     user_prompt: str,
+    #     tools: list[Tool] = None,
+    #     # toolsets: dict[str, MCPServerStreamableHTTP] = None,
+    #     history: list[ModelMessage] = None,
+    #     # debug: bool = False,
+    #     cache: dict = None,
+    #     ignore_cache: bool = False,
+    #     metadata: dict = None
+    # ):
+    #     """
+    #     Args:
+    #         prefix: a prefix to add when logging
+
+    #     Returns:
+    #         current_history: the new messages generated right now
+    #         result_output: the last message in the new messages
+    #         cache: dictionary to reuse inputs and outputs
+    #         ignore_cache: force token generation every time
+    #         metadata: metadata useful for matching caches without sharing history
+    #     """
+
+    #     tools = tools if tools is not None else []
+    #     cache = cache if cache is not None else []
+    #     # Loop through prompts until it stops calling tools and gives a final answer
+    #     input_bundle = (
+    #         task,
+    #         response_format,
+    #         user_prompt,
+    #         metadata,
+    #         tuple([tool.name for tool in tools]),
+    #         # tuple([toolset_name for toolset_name in toolsets.keys()])
+    #     )
+    #     input_hash = hashlib.sha256(pickle.dumps(input_bundle)).hexdigest()
+
+    #     if input_hash not in cache.keys() or ignore_cache:
+    #         # if debug:
+    #         #     input("Debug agent_step")
+
+    #         agent = Agent(
+    #             model=self.client,
+    #             system_prompt=task,
+    #             tools=tools,
+    #             toolsets=self.mcp_toolsets,     # Additional tools provided by mcp_config.json
+    #             capabilities=[hooks],
+    #             deps_type=AgentDeps
+    #         )
+
+    #         attempts=0
+    #         while True:
+    #             try:
+    #                 with disable_threads():
+    #                     try: 
+    #                         result = agent.run_sync(
+    #                             user_prompt=f"""
+    #                             {user_prompt}
+
+    #                             {response_format}
+    #                             """,
+    #                             message_history=history,
+    #                             deps=self.deps,
+    #                             usage_limits=UsageLimits(tool_calls_limit=20)
+    #                         )
+    #                     except ModelHTTPError as e:
+    #                         # Fall back to empty response
+    #                         log_error(f"Model HTTP Error: {e}")
+    #                         return [], "", cache
+    #                 break
+    #             except Exception as e:
+    #                 attempts+=1
+    #                 if attempts>3:
+    #                     raise e
+    #                 continue
+    #         cache[input_hash] = {
+    #             "new_messages": result.new_messages(),
+    #             "output": result.output,
+    #         }
+    #     return cache[input_hash]["new_messages"], cache[input_hash]["output"], cache
 
     def list_tool_calls(self, messages: list[ModelMessage]):
         tool_calls = [
