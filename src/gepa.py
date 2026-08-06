@@ -136,9 +136,9 @@ class GepaWrapper:
                         self.max_context_segment = evaluation_token_usage
                     self.token_count += evaluation_token_usage
                     if self.debug:
-                        log_response(f"[EVALUATOR] - RESULTS - {evaluation_result}")
+                        log_response(f"[EVALUATOR] - {evaluation_result}")
                     else:
-                        log_response(f"[EVALUATOR] - RESULTS - {evaluation_result[:50]}...(more)")
+                        log_response(f"[EVALUATOR] - {evaluation_result[:50]}...(more)")
 
                     # 2. Judge the quality of the simulated execution path against the original objective
                     progress_bar.title(titles["judge"])
@@ -148,16 +148,16 @@ class GepaWrapper:
                     )
                     judge_token_usage = _estimate_usage(judge_new_messages)
                     self.token_count += judge_token_usage.input_tokens + judge_token_usage.output_tokens
-                    if self.debug:
-                        log_response(f"[JUDGE] - {feedback}")
-                    else:
-                        log_response(f"[JUDGE] - {feedback[:50]}...(more)")
                     # 2.1. Stabilize JSON feedback from LLM
                     stable_feedback = stabilize_json(
                         unstable_string = feedback,
                         expected_keys = ["critique"]
                     )
                     score = float(stable_feedback["score"])
+                    if self.debug:
+                        log_response(f"[JUDGE] - {stable_feedback["critique"]}")
+                    else:
+                        log_response(f"[JUDGE] - {stable_feedback["critique"][:50]}...(more)")
                     log_response(f"[JUDGE] - {score}/100.0")
                     
                     # 3. Return score and ASI (feedback)
