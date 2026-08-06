@@ -19,34 +19,73 @@ parser = argparse.ArgumentParser(
 # parser.add_argument('-s', '--scope', help='scope to call', required=True)
 args = parser.parse_args()
 
-# 1. Retrieve seed
-# Get seed from specified file
-# if args.file:
-#     try:
-#         with open(args.file, 'r', encoding="utf-8") as f:
-#             seed = f.read()
-#     except FileNotFoundError:
-#         seed = None
-# else:
-#     seed = None
 class Optimus(GepaWrapper):
-    def __init__(self, objective: str, debug: bool = False):
+    def __init__(self, debug: bool = False):
         super().__init__(debug=debug)
-        self.objective = objective
-        self.seeds_dir = os.environ["HOME"]+'/'+'.optimus'
+        self.seeds_dir = os.environ["HOME"]+'/'+'.optimus/prompts'
 
-    def run(self):
-        # 1. Lazy find the most relevant known prompt to use as seed
-        seed_filename, seed = self.find_seed()
+    async def chat(self):
+        def list_modules():
+            pass
+        def make_module():
+            pass
+        def run_module():
+            pass
+        history = []
+        with open(os.environ["HOME"]+'/'+'.optimus/SYSTEM.md', 'r', encoding="utf-8") as f:
+            system = f.read()
+        agent = AgentWrapper(lm=self.model_string)
+        while True:
+            _, _ = await agent.async_step(
+                    task=system,
+                    response_format="",
+                    user_prompt=input("> "),
+                    stream=True,
+                    tools=[
+                        "list_modules",
+                        "run_module",
+                        "make_module"
+                    ]
+                )
+
+    def apply(self, objective: str):
+        """
+        Apply the available seeds to achieve the objective. Stop if none of the seeds are good.
+        Recalls and merges multiple seeds, synergizes with very fragmented seeds in learn mode.
+
+        Args:
+            objective: task to complete
+        """
+        pass
+
+    def learn(self, objective: str):
+        """
+        Run an optimus loop for a given objective.
+        1. Recalls most similar known prompt or defines a new one
+        2. Optimizes prompt
+        3. Stores the optimized prompt to ~/.optimus/prompts
+
+        Args:
+            objective: a string for steering the known prompts
+        """
+
+        # 1. Find the most relevant known prompt to use as seed
+        seed_filename, seed = self.find_seed(objective)
         # 2. Optimize seed with gepa
-        optimized_seed, optimized_seed_score = self.optimize(objective=self.objective, seed=seed)
+        optimized_seed, optimized_seed_score = self.optimize(
+            objective=objective,
+            # seed={"name": "test", "prompt": None},
+            seed={"name": seed_filename, "prompt": seed}
+        )
+
         # 3. Store optimized seed
         with open(self.seeds_dir+'/'+seed_filename, 'w', encoding="utf-8") as f:
-            log_internal_event(f"[OPTIMUS] Saving to ~/.optimus/{seed_filename}.")
+            log_internal_event(f"[OPTIMUS] Saving to {self.seeds_dir}/{seed_filename}.")
             print(optimized_seed, file=f)
+        
         return optimized_seed, optimized_seed_score
 
-    def find_seed(self):
+    def find_seed(self, objective: str):
         """
         Lazy find the most relevant known prompt file to use as seed
         """
@@ -65,26 +104,54 @@ class Optimus(GepaWrapper):
         log_internal_event(f"[OPTIMUS] Seeds preview: {seeds_preview}")
 
         # 2. Choose one seed
+        # agent = AgentWrapper(lm=self.model_string)
+        # _, seed_choice = agent.step(
+        #     task=f"""
+        #     # LIST OF AVAILABLE PROMPT FILES
+        #     {seeds_preview}
+
+        #     # TASK
+        #     Tell if a prompt file name is 100% suitable for routing the user request to. If not, give a new name.
+        #     """,
+        #     # Choose the most fitting prompt file name to route the user request to.
+        #     # If there aren't any routable prompts for the request, make a new prompt file name that you would add to the list.
+        #     response_format="""
+        #     Output format in JSON:
+        #     {{"explanation": "...", "name": "... (must be as specific as possible to maximize prompt efficiency)"}}
+        #     Return ONLY valid JSON.
+        #     Escape all quotes inside string values.
+        #     Escape all backslashes.
+        #     Do not include markdown fences.
+        #     """,
+        #     # {{"explanation": "...", "name": "... (broad topic to include a domain of operations)"}}
+        #     # {{"name": "... (must be as specific as possible to maximize prompt efficiency)", "explanation": "..."}}
+        #     user_prompt=objective
+        # )
+
         agent = AgentWrapper(lm=self.model_string)
         _, seed_choice = agent.step(
             task=f"""
-            LIST OF AVAILABLE PROMPT FILES
+            # LIST OF AVAILABLE MEMORY FRAGMENTS
             {seeds_preview}
 
-            TASK
-            Choose the most relevant prompt to route the user request to.
-            If there aren't any routable prompts for the request, make a new prompt file name that you would add to the list.
+            # TASK
+            Tell which memory fragment is suitable for incorporating the user request. Or propose a new memory fragment.
             """,
+            # Choose the most fitting prompt file name to route the user request to.
+            # If there aren't any routable prompts for the request, make a new prompt file name that you would add to the list.
             response_format="""
             Output format in JSON:
-            {{"name": "...", "explanation": "..."}}
+            {{"explanation": "...", "name": "... (must be as specific as possible to maximize memory efficiency)"}}
             Return ONLY valid JSON.
             Escape all quotes inside string values.
             Escape all backslashes.
             Do not include markdown fences.
             """,
-            user_prompt=self.objective
+            # {{"explanation": "...", "name": "... (broad topic to include a domain of operations)"}}
+            # {{"name": "... (must be as specific as possible to maximize prompt efficiency)", "explanation": "..."}}
+            user_prompt=objective
         )
+
 
         # 3. Stabilize json
         stable_feedback = stabilize_json(
@@ -93,22 +160,23 @@ class Optimus(GepaWrapper):
         )
 
         # 4. Get seed or fallback to empty seed
-        log_internal_event(f"[OPTIMUS] Choosing seed {stable_feedback["name"]}")
+        log_internal_event(f"[OPTIMUS] Choosing seed {stable_feedback}")
 
         try:
             with open(self.seeds_dir+'/'+stable_feedback["name"], 'r', encoding="utf-8") as f:
                 seed = f.read()
         except FileNotFoundError:
             seed = None
-        
+
         return stable_feedback["name"], seed if seed and len(seed) > 0 else None
 
 
 # 2. Optimize seed
-optimus = Optimus(objective=input(""))
-best_artifact, best_score = optimus.run()
-print("#########################################")
-print(best_artifact)
-print("#########################################")
-print(f"Tokens spent on evaluations: {optimus.token_count}")
-print(f"Best score: {best_score}/100.0")
+optimus = Optimus()
+while True:
+    best_artifact, best_score = optimus.learn(objective=input("> "))
+    print("#########################################")
+    print(best_artifact)
+    print("#########################################")
+    print(f"Tokens spent on evaluations: {optimus.token_count}")
+    print(f"Best score: {best_score}/100.0")

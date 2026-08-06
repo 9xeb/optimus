@@ -60,8 +60,9 @@ async def ensure_tool_approval(
         log_error(f"{ctx.deps.log_prefix} - before_tool_execute hook error: {e}")
         user_approved = False
     
-    # if user_approved:
-    #     log_internal_event(f"{ctx.deps.log_prefix} - TOOL APPROVED - {call.tool_name}({args})")    
+    if user_approved:
+        log_tool_request(f"{ctx.deps.log_prefix} - TOOL CALL - {call.tool_name}({args})")
+    #     log_internal_event(f"{ctx.deps.log_prefix} - TOOL APPROVED - {call.tool_name}({args})")
     if not user_approved:
         log_error(f"{ctx.deps.log_prefix} - TOOL REFUSED - {call.tool_name}({args})")
         # Skip execution and return a custom message  
@@ -153,7 +154,10 @@ class AgentWrapper:
             verbose=debug,
             tool_approval_function=default_tool_approval_function
         )
-        self.mcp_toolsets = load_mcp_servers(os.environ["MCP_CONFIG"]) if os.environ.get("MCP_CONFIG") else []
+
+        self.mcp_path = os.environ["HOME"]+'/'+".optimus/mcp.json"
+        self.mcp_toolsets = load_mcp_servers(self.mcp_path) if os.path.exists(self.mcp_path) else []
+        # self.mcp_toolsets = load_mcp_servers(os.environ["MCP_CONFIG"]) if os.environ.get("MCP_CONFIG") else []
 
     async def async_step(
         self,
@@ -162,6 +166,7 @@ class AgentWrapper:
         user_prompt: str,
         tools: list[Tool] = None,
         history: list[ModelMessage] = None,
+        stream: bool = False
     ):
         """
         Args:
@@ -179,7 +184,7 @@ class AgentWrapper:
             model=self.client,
             system_prompt=task,
             tools=tools,
-            toolsets=self.mcp_toolsets,     # Additional tools provided by mcp_config.json
+            toolsets=self.mcp_toolsets,     # Additional tools provided by mcp.json
             capabilities=[
                 hooks,
                 Thinking(effort=self.thinking)
@@ -197,8 +202,9 @@ class AgentWrapper:
                 deps=self.deps,
                 usage_limits=UsageLimits(tool_calls_limit=20)
             ) as result:
-                async for text in result.stream_text():
-                    print(text)
+                if stream:
+                    async for text in result.stream_text():
+                        print(text)
                 # stream finished here, collect results
                 output = await result.get_output()
                 return result.new_messages(), output
@@ -226,8 +232,8 @@ class AgentWrapper:
         """
 
         tools = tools if tools is not None else []
+        # log_error(f"Available tools: {tools}")
         # Loop through prompts until it stops calling tools and gives a final answer
-
         agent = Agent(
             model=self.client,
             system_prompt=task,
@@ -266,96 +272,96 @@ class AgentWrapper:
                 continue
         return result.new_messages(), result.output
 
-    # def step(
-    #     self,
-    #     task: str,
-    #     response_format: str,
-    #     user_prompt: str,
-    #     tools: list[Tool] = None,
-    #     # toolsets: dict[str, MCPServerStreamableHTTP] = None,
-    #     history: list[ModelMessage] = None,
-    #     # debug: bool = False,
-    #     cache: dict = None,
-    #     ignore_cache: bool = False,
-    #     metadata: dict = None
-    # ):
-    #     """
-    #     Args:
-    #         prefix: a prefix to add when logging
+    def simulate(self, prompt: str):
+        """
+        Simulate execution path of a certain prompt.
+        Useful for assessing quality of prompt or generating examples for few shot agents.
 
-    #     Returns:
-    #         current_history: the new messages generated right now
-    #         result_output: the last message in the new messages
-    #         cache: dictionary to reuse inputs and outputs
-    #         ignore_cache: force token generation every time
-    #         metadata: metadata useful for matching caches without sharing history
-    #     """
+        Args:
+            prompt: string containing instructions for an AI Agent
+        """
+        return self.step(
+            task="Simulate an execution path with a list of tool calls to solve the user's problem.",
+            response_format="OUTPUT FORMAT\nBrief bullet point list of tool calls with possible scenarios. Single paragraph.",
+            user_prompt=prompt,
+            # tools=[],     # these are read by AgentWrapper class from ~/.optimus/mcp.json
+        )
+    
+    def judge(self, premise: str, proposal: str):
+        """
+        Rate how well a proposed string incorporates information contained in a premise string.
 
-    #     tools = tools if tools is not None else []
-    #     cache = cache if cache is not None else []
-    #     # Loop through prompts until it stops calling tools and gives a final answer
-    #     input_bundle = (
-    #         task,
-    #         response_format,
-    #         user_prompt,
-    #         metadata,
-    #         tuple([tool.name for tool in tools]),
-    #         # tuple([toolset_name for toolset_name in toolsets.keys()])
-    #     )
-    #     input_hash = hashlib.sha256(pickle.dumps(input_bundle)).hexdigest()
+        Args:
+            premise: a string containing a premise in natural language. Facts, statements, information.
+            proposal: a string containing a proposal to test againts the premise. Instructions, execution paths, procedures.
+        """
+        return self.step(
+            task="""
+            # YOUR ROLE
+            You are the Judge. 
+            Rate how well the PROPOSAL respects the PREMISE. A valid PROPOSAL must consider the PREMISE.
+            """,
+            response_format="""
+            # YOUR OUTPUT FORMAT
+            Output format in JSON:
+            {{"critique": "... (how the PROPOSAL violates the PREMISE)", "score": "between 0 and 100"}}
+            Return ONLY valid JSON.
+            Escape all quotes inside string values.
+            Escape all backslashes.
+            Do not include markdown fences.
+            """,
+            user_prompt=f"""
 
-    #     if input_hash not in cache.keys() or ignore_cache:
-    #         # if debug:
-    #         #     input("Debug agent_step")
+            # PROPOSAL
+            {proposal}
 
-    #         agent = Agent(
-    #             model=self.client,
-    #             system_prompt=task,
-    #             tools=tools,
-    #             toolsets=self.mcp_toolsets,     # Additional tools provided by mcp_config.json
-    #             capabilities=[hooks],
-    #             deps_type=AgentDeps
-    #         )
+            # PREMISE
+            {premise}
+            """,
+            tools=[
+                # Tool(ask_human_expert, takes_ctx=False, metadata={'read_only': True})
+            ],
+            # history=evaluation_new_messages,
+        )
 
-    #         attempts=0
-    #         while True:
-    #             try:
-    #                 with disable_threads():
-    #                     try: 
-    #                         result = agent.run_sync(
-    #                             user_prompt=f"""
-    #                             {user_prompt}
+    def merge(self, current: str, inbound: str):
+        """
+        Merge information contained inside inbound string with current string
 
-    #                             {response_format}
-    #                             """,
-    #                             message_history=history,
-    #                             deps=self.deps,
-    #                             usage_limits=UsageLimits(tool_calls_limit=20)
-    #                         )
-    #                     except ModelHTTPError as e:
-    #                         # Fall back to empty response
-    #                         log_error(f"Model HTTP Error: {e}")
-    #                         return [], "", cache
-    #                 break
-    #             except Exception as e:
-    #                 attempts+=1
-    #                 if attempts>3:
-    #                     raise e
-    #                 continue
-    #         cache[input_hash] = {
-    #             "new_messages": result.new_messages(),
-    #             "output": result.output,
+        Args:
+            current: a string containing current information
+            inbound: a string containing new information to merge
+        """
+        return self.step(
+            task="""
+            # YOUR ROLE
+            You are the Information Merger.
+            Given a CURRENT text and an INBOUND text, create a new text that incorporates information from INBOUND inside CURRENT.
+            """,
+            reponse_format="",
+            user_prompt=f"""
+
+            # CURRENT
+            {current}
+
+            # INBOUND
+            {inbound}
+            """,
+            tools=[
+                # Tool(ask_human_expert, takes_ctx=False, metadata={'read_only': True})
+            ],
+            # history=evaluation_new_messages,
+        )
+
+
+    # def list_tool_calls(self, messages: list[ModelMessage]):
+    #     tool_calls = [
+    #         {
+    #             "name": part.tool_name,
+    #             "args": json.loads(part.args)
     #         }
-    #     return cache[input_hash]["new_messages"], cache[input_hash]["output"], cache
-
-    def list_tool_calls(self, messages: list[ModelMessage]):
-        tool_calls = [
-            {
-                "name": part.tool_name,
-                "args": json.loads(part.args)
-            }
-            for message in messages
-            for part in message.parts
-            if part.part_kind == "tool-call"
-        ]
-        return tool_calls
+    #         for message in messages
+    #         for part in message.parts
+    #         if part.part_kind == "tool-call"
+    #     ]
+    #     return tool_calls

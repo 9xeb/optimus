@@ -10,7 +10,7 @@ from alive_progress import alive_bar
 
 from src.agent import AgentWrapper
 from src.utils import initialize_openai_client, stabilize_json
-from src.log import log_error, log_internal_event, log_request, log_response
+from src.log import log_error, log_internal_event, log_request, log_response, log_tool_request, log_tool_response
 
 # Suppress verbose LiteLLM logging
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
@@ -18,9 +18,17 @@ logging.getLogger("litellm").setLevel(logging.WARNING)
 
 class GepaWrapper:
     def __init__(self, debug: bool = False):
-        self.concision_clause = """
-        (The prompt must only contain the amount of words necessary. Avoid repetitions and verbose instructions. Do not include information that you would otherwise be able to infer).
-        """
+        self.concision_clause = "(Avoid repetitions and verbose instructions. Minimize additional assumptions. Do not include information that you would be able to infer naturally.)"
+        # Your AI Agent instructions must be efficient. Cut all filler, keep substance.
+        #     - Drop articles (a, an, the), filler (just, really, basically, actually).
+        #     - Drop pleasantries (sure, certainly, happy to).
+        #     - No hedging. Fragments fine. Short synonyms.
+
+
+
+        # (Avoid repetitions and verbose instructions. Avoid additional assumptions that different users might disagree on. Do not include information that you would be able to infer naturally. Do not lose previously known information, merge instead of replace).
+        
+        # (The prompt must only contain the amount of words necessary. Avoid repetitions and verbose instructions. Do not include information that you would otherwise be able to infer).
         # Model string in format 'openai/unsloth/gemma-4-E4B-it-GGUF:Q4_K_M'
         # self.model_string = model_string
         self.model_string = os.environ["OPENAI_API_MODEL"]
@@ -37,17 +45,20 @@ class GepaWrapper:
         self.max_context_segment = 0
 
     # def steer(self, criteria: list[str]):
-    def optimize(self, objective: str, seed: str = None):
+    def optimize(self, objective: str, seed: dict[str,str]):
         """
         Apply criteria to artifact via evolutionary algorithms.
         Evolution is powered by GEPA's optimize_anything function.
         """
+        seed_name = seed["name"]
+        seed_text = seed["prompt"]
         objective = objective + ".\n" + self.concision_clause
         titles = {
             "optimus": "[OPTIMUS] - Preparing experiments...",
-            "evaluator": "[EVALUATOR] - Running instructions...",
+            "evaluator": "[EVALUATOR] - Simulating execution path...",
             "reflection": "[REFLECTION] - Refining instructions...",
-            "judge": "[JUDGE] - Judging run results..."
+            "judge": "[JUDGE] - Judging execution path...",
+            "merger": "[MERGER] - Merging instructions..."
         }
         self.best_score = 0
     
@@ -58,14 +69,45 @@ class GepaWrapper:
             title_length=max([len(titles[title]) for title in titles])
         ) as progress_bar:
             progress_bar.title(titles["optimus"])
-            def ask_question(question: str):
-                """
-                Always ask questions when the proposed solution made assumptions that are not clear in the objective.
-                The response to the question is authoritative and can steer the feedback.
-                """
-                return input(f"{question}\n")
+            # def ask_human_expert(message: str):
+            #     """
+            #     Ask a human expert that provided the PREMISE, for help in assessing parts of the PROPOSAL.
+
+            #     Args:
+            #         message: message for the human expert
+            #     """
+            #     return input(f"{message}\n")
+            # def ask_user_question(question: str):
+            #     """
+            #     Ask a question to the user. Always use this instead of stopping to ask the question. 
+
+            #     Args:
+            #         question: message for the human expert
+            #     """
+            #     return input(f"#####\n{question}\n#####\n> ")
+
+            # async def bash(cmd: str):
+            #     """
+            #     Send bash instructions to run. Any command is supported.
+            
+            #     Args:
+            #         cmd: command or script to run
+            #     """
+            #     # This is actually a simulated command output
+            #     # log_tool_request(f"[OPTIMUS] - Simulating tool output")
+            #     agent = AgentWrapper(lm=self.model_string, debug=self.debug)
+            #     _, response = await agent.async_step(
+            #         task=f"""
+            #         Simulate the output of the provided command for the following scenario: {objective}.
+            #         """,
+            #         response_format="Only provide the command output.",
+            #         user_prompt=cmd
+            #     )
+            #     log_tool_response(f"[OPTIMUS] - {response[:100]}...")
+            #     return response
 
             def evaluate_configuration(candidate: str):
+
                 log_request(f"[REFLECTION] - {candidate[:50]}...(more)")
                 try:
                     agent = AgentWrapper(lm=self.model_string, debug=self.debug)
@@ -73,12 +115,7 @@ class GepaWrapper:
                     # 1. Deploy candidate in the environment and store results
                     # log_internal_event("[EVALUATOR] - Running draft...")
                     progress_bar.title(titles["evaluator"])
-                    evaluation_new_messages, evaluation_result = agent.step(
-                        task="",
-                        response_format="",
-                        user_prompt=candidate,
-                        # tools=[],     # these are read by AgentWrapper class from MCP_CONFIG env var
-                    )
+                    evaluation_new_messages, evaluation_result = agent.simulate(prompt=candidate)
 
                     # 2. Estimate token usage and track largest context segment
                     evaluation_token_usage = _estimate_usage(evaluation_new_messages).input_tokens + _estimate_usage(evaluation_new_messages).output_tokens
@@ -86,43 +123,21 @@ class GepaWrapper:
                         self.max_context_segment = evaluation_token_usage
                     self.token_count += evaluation_token_usage
 
-                    log_response(f"[EVALUATOR] - RESULTS - {evaluation_result[:50]}...(more)")
-                    evaluation_tool_calls = agent.list_tool_calls(evaluation_new_messages)
-                    log_response(f"[EVALUATOR] - TOOL CALLS - {json.dumps(evaluation_tool_calls)}]")
+                    # log_response(f"[EVALUATOR] - RESULTS - {evaluation_result[:50]}...(more)")
+                    log_response(f"[EVALUATOR] - RESULTS - {evaluation_result}")
+                    # evaluation_tool_calls = agent.list_tool_calls(evaluation_new_messages)
+                    # log_response(f"[EVALUATOR] - TOOL CALLS - {json.dumps(evaluation_tool_calls)}]")
 
                     # 3. Judge the result of a candidate
                     progress_bar.title(titles["judge"])
-                    judge_new_messages, feedback = agent.step(
-                        task="Criticize the proposed solution attempt at the goal. Focus on missing or wrong points that violate the goal.",
-                        # task="Grill the proposed solution attempt.",
-                        response_format="""
-                        Output format in JSON:
-                        {{"critique": "...", "score": "between 0 and 100"}}
-                        Return ONLY valid JSON.
-                        Escape all quotes inside string values.
-                        Escape all backslashes.
-                        Do not include markdown fences.
-                        """,
-                        user_prompt=f"""
-                        # GOAL
-                        {objective}
-
-                        # SOLUTION ATTEMPT
-                        ## TOOLS CALLED
-                        {json.dumps(evaluation_tool_calls)}
-                        ## RESPONSE
-                        {evaluation_result}
-                        """,
-                        tools=[
-                            Tool(ask_question, takes_ctx=False, metadata={'read_only': True})
-                        ],
-                        # declarative_tools={},
-                        # toolsets={},
-                        # history=past_history,
+                    judge_new_messages, feedback = agent.judge(
+                        premise=objective,
+                        proposal=evaluation_result
                     )
                     judge_token_usage = _estimate_usage(judge_new_messages)
                     self.token_count += judge_token_usage.input_tokens + judge_token_usage.output_tokens
                     log_response(f"[JUDGE] - {feedback[:50]}...(more)")
+                    # log_response(f"[JUDGE] - {feedback}")
 
                     # 4. Stabilize JSON feedback from LLM
                     stable_feedback = stabilize_json(
@@ -143,8 +158,9 @@ class GepaWrapper:
                         "scores": {
                             "score": score
                         },
-                        "artifact": candidate,
-                        "feedback": stable_feedback
+                        # "artifact": candidate,
+                        "fix_this_in_instructions": stable_feedback["critique"],
+                        "remark": "When fixing instructions, do not lose previous information. Merge instead of replace."
                     }
                 except Exception as e:
                     log_error(f"CRITICAL ERROR - GEPA STEP FAILED - {e}")
@@ -169,14 +185,23 @@ class GepaWrapper:
             # 2. Optimize from seed
             gepa_results = self.opinionated_optimize_anything(
                 evaluator=evaluate_configuration,
-                objective=f"Refine LLM instructions meant to fulfill the following task: {objective}",
-                seed_candidate=seed,
+                # objective=f"Refine AI Agent instructions meant to complete the following task: {objective}",
+                # objective=f"Refine avalable AI Agent instructions to incorporate the following information: {objective}",
+                objective=f"Refine current AI Agent instructions to solve the class of problems incorporating the following information: {objective}",
+                seed_candidate=seed_text,
                 # seed_candidate=self.seed_candidate,
                 # criteria=criteria,
                 # seed=self.artifact
             )
 
-            return gepa_results.best_candidate, gepa_results.val_aggregate_scores[gepa_results.best_idx]
+            # 3. If previous seed existed, merge seed and optimized seed (mitigate information loss)
+            if seed_text:
+                progress_bar.title(titles["merger"])
+                agent = AgentWrapper(lm=self.model_string, debug=self.debug)
+                _, merger = agent.merge(current=seed_text, inbound=gepa_results.best_candidate)
+                return merger, gepa_results.val_aggregate_scores[gepa_results.best_idx]
+            else:
+                return gepa_results.best_candidate, gepa_results.val_aggregate_scores[gepa_results.best_idx]
 
     def opinionated_optimize_anything(
         self,
