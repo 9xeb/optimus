@@ -17,38 +17,40 @@ logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 logging.getLogger("litellm").setLevel(logging.WARNING)
 
 class GepaWrapper:
+    """
+    Class that incorporates GEPA prompt optimization methods.
+    It is fundamentally a three agent system where:
+        1. Reflection refines LLM instruction candidates from feedback
+        2. Evaluator simulates execution paths with LLM instructions
+        3. Judge comments on execution paths and sends back feedback to Reflection
+    The system goes on until a plateau is reached (did not increase feedback score after N tries), or a score of 100 is reached.
+    """
     def __init__(self, debug: bool = False):
         self.concision_clause = "(Avoid repetitions and verbose instructions. Minimize additional assumptions. Do not include information that you would be able to infer naturally.)"
         # Your AI Agent instructions must be efficient. Cut all filler, keep substance.
         #     - Drop articles (a, an, the), filler (just, really, basically, actually).
         #     - Drop pleasantries (sure, certainly, happy to).
         #     - No hedging. Fragments fine. Short synonyms.
-
-
-
-        # (Avoid repetitions and verbose instructions. Avoid additional assumptions that different users might disagree on. Do not include information that you would be able to infer naturally. Do not lose previously known information, merge instead of replace).
-        
-        # (The prompt must only contain the amount of words necessary. Avoid repetitions and verbose instructions. Do not include information that you would otherwise be able to infer).
-        # Model string in format 'openai/unsloth/gemma-4-E4B-it-GGUF:Q4_K_M'
-        # self.model_string = model_string
         self.model_string = os.environ["OPENAI_API_MODEL"]
-        # self.objective = objective
-        # self.seed_candidate = seed
         self.agent_cache = {}
         self.debug = debug
         self.client = initialize_openai_client(self.model_string)
-        # self.run_dir = './.optimus'         # Where GEPA state will be stored
-
         self.token_count = 0
         self.best_score = 0
-
         self.max_context_segment = 0
 
     # def steer(self, criteria: list[str]):
     def optimize(self, objective: str, seed: dict[str,str]):
         """
-        Apply criteria to artifact via evolutionary algorithms.
-        Evolution is powered by GEPA's optimize_anything function.
+        Given an objective and a starting prompt draft, try to improve the draft.
+        Improvement is guided by GEPA's optimize_anything evolutionary algorithm, specialized for AI agent instructions.
+
+        Args:
+            objective: a string to steer the evolution
+            seed: a dictionary containing the title and content of the starting prompt draft
+        
+        Returns:
+            A tuple containing the improved draft and its score.
         """
         seed_name = seed["name"]
         seed_text = seed["prompt"]
@@ -62,6 +64,7 @@ class GepaWrapper:
         }
         self.best_score = 0
     
+        # Wrap inside the progress bar for pretty printing
         with alive_bar(
             total=100,
             dual_line=True,
@@ -107,28 +110,37 @@ class GepaWrapper:
             #     return response
 
             def evaluate_configuration(candidate: str):
+                """
+                This is the local evaluation function used by GEPA to assess and score candidates proposed by the Reflection.
+                Candidate prompts are simulated in execution paths by the Evaluator, and the execution is judged and scored.
 
-                log_request(f"[REFLECTION] - {candidate[:50]}...(more)")
+                Args:
+                    candidate: a string coming from the Reflection
+                
+                Returns:
+                    A score between 0 and 100, and the Judge's feedback to steer the Reflection.
+                """
+                if self.debug:
+                    log_request(f"[REFLECTION] - {candidate}")
+                else:
+                    log_request(f"[REFLECTION] - {candidate[:50]}...(more)")
+
                 try:
                     agent = AgentWrapper(lm=self.model_string, debug=self.debug)
 
-                    # 1. Deploy candidate in the environment and store results
-                    # log_internal_event("[EVALUATOR] - Running draft...")
-                    progress_bar.title(titles["evaluator"])
+                    # 1. Evaluate the candidate via simulated execution paths
+                    progress_bar.title(titles["evaluator"])     # this changes progress bar title
                     evaluation_new_messages, evaluation_result = agent.simulate(prompt=candidate)
-
-                    # 2. Estimate token usage and track largest context segment
                     evaluation_token_usage = _estimate_usage(evaluation_new_messages).input_tokens + _estimate_usage(evaluation_new_messages).output_tokens
                     if evaluation_token_usage > self.max_context_segment:
                         self.max_context_segment = evaluation_token_usage
                     self.token_count += evaluation_token_usage
+                    if self.debug:
+                        log_response(f"[EVALUATOR] - RESULTS - {evaluation_result}")
+                    else:
+                        log_response(f"[EVALUATOR] - RESULTS - {evaluation_result[:50]}...(more)")
 
-                    # log_response(f"[EVALUATOR] - RESULTS - {evaluation_result[:50]}...(more)")
-                    log_response(f"[EVALUATOR] - RESULTS - {evaluation_result}")
-                    # evaluation_tool_calls = agent.list_tool_calls(evaluation_new_messages)
-                    # log_response(f"[EVALUATOR] - TOOL CALLS - {json.dumps(evaluation_tool_calls)}]")
-
-                    # 3. Judge the result of a candidate
+                    # 2. Judge the quality of the simulated execution path against the original objective
                     progress_bar.title(titles["judge"])
                     judge_new_messages, feedback = agent.judge(
                         premise=objective,
@@ -136,20 +148,19 @@ class GepaWrapper:
                     )
                     judge_token_usage = _estimate_usage(judge_new_messages)
                     self.token_count += judge_token_usage.input_tokens + judge_token_usage.output_tokens
-                    log_response(f"[JUDGE] - {feedback[:50]}...(more)")
-                    # log_response(f"[JUDGE] - {feedback}")
-
-                    # 4. Stabilize JSON feedback from LLM
+                    if self.debug:
+                        log_response(f"[JUDGE] - {feedback}")
+                    else:
+                        log_response(f"[JUDGE] - {feedback[:50]}...(more)")
+                    # 2.1. Stabilize JSON feedback from LLM
                     stable_feedback = stabilize_json(
                         unstable_string = feedback,
-                        # expected_keys = ["score_explanation"]
-                        # expected_keys = ["pros","cons"]
                         expected_keys = ["critique"]
                     )
                     score = float(stable_feedback["score"])
                     log_response(f"[JUDGE] - {score}/100.0")
                     
-                    # 5. Return score and ASI
+                    # 3. Return score and ASI (feedback)
                     if score > self.best_score:
                         self.best_score = score
                         progress_bar(score/100.0)       # Update progress bar
@@ -163,8 +174,8 @@ class GepaWrapper:
                         "remark": "When fixing instructions, do not lose previous information. Merge instead of replace."
                     }
                 except Exception as e:
+                    # In case of exceptions (broken JSONs, unreachable APIs, ...) fallback to a low score
                     log_error(f"CRITICAL ERROR - GEPA STEP FAILED - {e}")
-                    # raise e
                     return 0.0, {
                         "scores": {
                             "score": 0.0
@@ -173,34 +184,22 @@ class GepaWrapper:
                         "feedback": f"Provided JSON is malformed. Hint to fix: {e}"
                     }
 
-            # criteria = [
-            #     # TODO: expand criteria to run logs and human inputs, to achieve a continuous learning agent
-            #     {"id": "New Information", "criteria": f"Rate the presence of the following information: {nudge}"},
-            #     {"id": "Objective", "criteria": f"Rate the level of fulfillment of the following objective: {self.objective}"},
-            # ]
-            # if self.artifact != "...":
-            #     # Add old info criteria for repated nudges
-            #     criteria+=[{"id": "Old Information", "criteria": f"Rate the presense of the following information: {self.artifact}"}]
-
-            # 2. Optimize from seed
+            # This is the actual optimization call, that uses the above local evaluation function
             gepa_results = self.opinionated_optimize_anything(
                 evaluator=evaluate_configuration,
-                # objective=f"Refine AI Agent instructions meant to complete the following task: {objective}",
-                # objective=f"Refine avalable AI Agent instructions to incorporate the following information: {objective}",
                 objective=f"Refine current AI Agent instructions to solve the class of problems incorporating the following information: {objective}",
                 seed_candidate=seed_text,
-                # seed_candidate=self.seed_candidate,
-                # criteria=criteria,
-                # seed=self.artifact
             )
 
-            # 3. If previous seed existed, merge seed and optimized seed (mitigate information loss)
+            # The following step is crucial to mitigate information loss in repeated optimizations
             if seed_text:
+                # If previous seed existed, merge seed and GEPA optimization results
                 progress_bar.title(titles["merger"])
                 agent = AgentWrapper(lm=self.model_string, debug=self.debug)
                 _, merger = agent.merge(current=seed_text, inbound=gepa_results.best_candidate)
                 return merger, gepa_results.val_aggregate_scores[gepa_results.best_idx]
             else:
+                # We get here if there was no original seed, just return the optimized prompt as is.
                 return gepa_results.best_candidate, gepa_results.val_aggregate_scores[gepa_results.best_idx]
 
     def opinionated_optimize_anything(
@@ -224,17 +223,20 @@ class GepaWrapper:
             evaluator: custom function to judge candidates
             objective: tells the REFLECTION what the optimization should achieve
             criteria: (optional) nudges consumed by EVALUATOR
-            seed: (optional) starting artifact
+            seed_candidate: (optional) starting artifact
         """
 
-        class QuietLogger:  
+        class QuietLogger:
+            """
+            The minimum viable class to suppress verbose logs coming out of GEPA loops.
+            """  
             def log(self, message: str):
                 # if "Proposed new text for current_candidate:" not in message:
                 #     print(f"[GEPA] - {message}")
                 pass  # swallow all messages
 
+        # This is the core of the optimization capabilities of Optimus. A very curated GEPA configuration.
         return optimize_anything(
-            # seed_candidate=seed,
             evaluator=evaluator,
             # dataset=criteria if criteria is not None else [],
             # valset=criteria,                      # test against this set of criteria

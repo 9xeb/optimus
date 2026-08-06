@@ -18,6 +18,10 @@ from src.log import log_tool_request, log_error, log_internal_event, log_request
 
 @dataclass
 class AgentDeps:
+    """
+    A dataclass to pass information to Pydantic AI Agent instances.
+    This information can be then retrieved hooks, which is quite handy.
+    """
     log_prefix: str
     verbose: bool
     # tool approval function takes (ctx, tool_name, args) -> bool. Defaults to returning always true
@@ -38,15 +42,19 @@ async def default_tool_approval_function(ctx: RunContext[AgentDeps], tool_name: 
         return False
 
 hooks = Hooks()     # Initialize hooks container
-# Register tool execution logging hooks  
-@hooks.on.before_tool_execute  
-async def ensure_tool_approval(  
-    ctx: RunContext[AgentDeps],   
-    *,   
-    call: ToolCallPart,   
-    tool_def: ToolDefinition,   
-    args: dict[str, Any]  
+# Register tool execution logging hooks
+@hooks.on.before_tool_execute
+async def ensure_tool_approval(
+    ctx: RunContext[AgentDeps],
+    *,
+    call: ToolCallPart,
+    tool_def: ToolDefinition,
+    args: dict[str, Any]
 ) -> dict[str, Any]:
+    """
+    Agent hook that calls the tool approval function bundled in the AgentDeps.
+    Tool approval is called only if the tool is not marked as read_only in its metadata.
+    """
     try:
         if not tool_def.metadata.get("read_only"):
             log_internal_event(f"{ctx.deps.log_prefix} - TOOL APPROVAL REQUIRED - {call.tool_name}({args})")
@@ -69,25 +77,28 @@ async def ensure_tool_approval(
         raise SkipToolExecution(result=f"Tool {call.tool_name} was not approved")
     return args
 
-@hooks.on.after_tool_execute  
-async def log_tool_result(  
-    ctx: RunContext[AgentDeps],  
-    *,  
-    call: ToolCallPart,  
-    tool_def: ToolDefinition,  
-    args: dict[str, Any],  
-    result: Any,  
+@hooks.on.after_tool_execute
+async def log_tool_result(
+    ctx: RunContext[AgentDeps],
+    *,
+    call: ToolCallPart,
+    tool_def: ToolDefinition,
+    args: dict[str, Any],
+    result: Any,
 ) -> Any:
-    try:  
+    """
+    Simple logging of tool output previews after they are executed. 
+    """
+    try:
         # Your logging logic here
         # if ctx.deps.verbose:
         print_output_limit = 200
         # agent_output_limit = 5000
         # truncated_result = f"{result[:agent_output_limit+1]} {"[... truncated due to exceeding output size limits. Try filtering or grepping.]" if len(result) > agent_output_limit else ""}"
         log_tool_response(f'{ctx.deps.log_prefix}{call.tool_name}\n{result[:print_output_limit]}{" [... truncated]" if len(result) > print_output_limit else ""}')
-    except Exception as e:  
+    except Exception as e:
         # Don't let exceptions propagate - they cause retries  
-        log_error(f"{ctx.deps.log_prefix} - after_tool_execute hook error: {e}")  
+        log_error(f"{ctx.deps.log_prefix} - after_tool_execute hook error: {e}")
     # agent_output_limit = 5000
     # truncated_result = f"{result[:agent_output_limit+1]} {"[... truncated due to exceeding output size limits. Try filtering or grepping.]" if len(result) > agent_output_limit else ""}"
     return result
@@ -95,6 +106,9 @@ async def log_tool_result(
 # Model request logging  
 @hooks.on.before_model_request  
 async def log_before_request(ctx: RunContext[AgentDeps], request_context):
+    """
+    Log prompt before executing it if verbose flag is set in AgentDeps
+    """
     try:
         if ctx.deps.verbose:
             history_size = len(request_context.messages)
@@ -116,6 +130,9 @@ async def log_before_request(ctx: RunContext[AgentDeps], request_context):
 
 @hooks.on.after_model_request  
 async def log_after_response(ctx: RunContext[AgentDeps], *, request_context, response):
+    """
+    Log final agent response if verbose flag is set in AgentDeps
+    """
     try:
         if ctx.deps.verbose:
             # Response can include tool calls, so we log them here instead of @hooks.on.before_tool_call
@@ -138,6 +155,9 @@ async def log_after_response(ctx: RunContext[AgentDeps], *, request_context, res
 # Error handling
 @hooks.on.tool_execute_error
 async def log_tool_error(ctx: RunContext[AgentDeps], *, call, tool_def, args, error):
+    """
+    Log tool execution errors when they happen.
+    """
     try:
         log_error(f"{ctx.deps.log_prefix} - Tool {call.tool_name} failed: {error} (automatic retry)")
     except Exception as e:
@@ -146,6 +166,15 @@ async def log_tool_error(ctx: RunContext[AgentDeps], *, call, tool_def, args, er
 
 
 class AgentWrapper:
+    """
+    This class uses Pydantic AI's Agent to provide some utilities to be used in GEPA and Optimus.
+    Wraps Agent's run and run_streaming.
+    But also provides some additional agentic capabilities that are relevant to make Optimus happen.
+    For example:
+        - simulating execution paths with tool calls given a prompt
+        - judging relevance of a string to another
+        - merging information contained in two strings
+    """
     def __init__(self, lm: str, thinking: bool = True, debug: bool = False):
         self.client = initialize_openai_client(lm)
         self.thinking = thinking
@@ -169,16 +198,22 @@ class AgentWrapper:
         stream: bool = False
     ):
         """
+        Async version of the basic wrapper around Agent's run, with streaming support.
+
         Args:
-            prefix: a prefix to add when logging
+            task: system prompt
+            response_format: suffix appended to system prompt to direct response format
+            user_prompt: first message provided to the Agent
+            tools: list of tools that the Agent can call
+            history: a previous history of messages in a conversation
+            stream: a flag to enable or disable token streaming on the screen
 
         Returns:
-            current_history: the new messages generated right now
-            result_output: the last message in the new messages
+            A tuple containing:
+                new_messages: all the new messages generated by the agent, incluting thoughts and tool call signatures
+                output: the final message in the agent's response
         """
-
         tools = tools if tools is not None else []
-        # Loop through prompts until it stops calling tools and gives a final answer
 
         agent = Agent(
             model=self.client,
@@ -193,6 +228,7 @@ class AgentWrapper:
         )
 
         try:
+            # Loop through prompts until it stops calling tools and gives a final answer
             async with agent.run_stream(
                 user_prompt=f"""
                 {user_prompt}
@@ -203,9 +239,10 @@ class AgentWrapper:
                 usage_limits=UsageLimits(tool_calls_limit=20)
             ) as result:
                 if stream:
+                    # Stream output tokens one by one
                     async for text in result.stream_text():
                         print(text)
-                # stream finished here, collect results
+                # Collect results
                 output = await result.get_output()
                 return result.new_messages(), output
         except ModelHTTPError as e:
@@ -223,12 +260,19 @@ class AgentWrapper:
         history: list[ModelMessage] = None,
     ):
         """
+        Synchronous version of the basic wrapper around Agent's run, with streaming support.
+
         Args:
-            prefix: a prefix to add when logging
+            task: system prompt
+            response_format: suffix appended to system prompt to direct response format
+            user_prompt: first message provided to the Agent
+            tools: list of tools that the Agent can call
+            history: a previous history of messages in a conversation
 
         Returns:
-            current_history: the new messages generated right now
-            result_output: the last message in the new messages
+            A tuple containing:
+                new_messages: all the new messages generated by the agent, incluting thoughts and tool call signatures
+                output: the final message in the agent's response
         """
 
         tools = tools if tools is not None else []
@@ -338,7 +382,7 @@ class AgentWrapper:
             You are the Information Merger.
             Given a CURRENT text and an INBOUND text, create a new text that incorporates information from INBOUND inside CURRENT.
             """,
-            reponse_format="",
+            response_format="",
             user_prompt=f"""
 
             # CURRENT
