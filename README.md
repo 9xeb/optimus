@@ -39,6 +39,8 @@ Agentic:
 echo "Find pod problems in the kubernetes cluster" | python3 optimus.py
 ```
 
+Stores currently discovered prompts in ~/.optimus/prompts as memory fragments.
+
 ### How it works
 Suppose your AI agent achieved the intended goal with no mistakes and no hiccups, then look just one step back. All your AGENT.md, MEMORY.md, skills, tool signatures, RAG knowledge, chat messages were merged into a single, final prompt. And that prompt got the job done. 
 
