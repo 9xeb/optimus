@@ -16,7 +16,7 @@ COPY ./requirements.txt ./requirements.txt
 RUN python3 -m pip install -r requirements.txt
 COPY ./src ./src
 COPY ./optimus.py ./optimus.py
-COPY ./mcp_config.json ./mcp_config.json
+COPY ./mcp.json ~/.optimus/mcp.json
 
 # set ENTRYPOINT for reloading nvm-environment
 ENTRYPOINT ["bash", "-c", "source $NVM_DIR/nvm.sh && exec \"$@\"", "--"]

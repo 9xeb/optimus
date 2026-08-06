@@ -17,7 +17,7 @@ RUN python3 -m pip install -r requirements.txt
 COPY ./src ./src
 COPY ./optimus.py ./optimus.py
 COPY ./test_optimus.py ./test_optimus.py
-COPY ./mcp_config.json ./mcp_config.json
+COPY ./mcp.json ~/.optimus/mcp.json
 
 # set ENTRYPOINT for unit testing
 ENTRYPOINT ["python3", "-m", "pytest"]
