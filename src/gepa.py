@@ -126,11 +126,14 @@ class GepaWrapper:
                     log_request(f"[REFLECTION] - {candidate[:50]}...(more)")
 
                 try:
-                    agent = AgentWrapper(lm=self.model_string, debug=self.debug)
+                    evaluator_agent = AgentWrapper(enable_mcp_toolsets=True, debug=self.debug)  # with access MCP toolsets for performing operations
+                    judge_agent = AgentWrapper(debug=self.debug)
+
+                    progress_bar.title(titles["evaluator"])     # this changes progress bar title
 
                     # 1. Evaluate the candidate via simulated execution paths
-                    progress_bar.title(titles["evaluator"])     # this changes progress bar title
-                    evaluation_new_messages, evaluation_result = agent.simulate(prompt=candidate)
+                    evaluation_new_messages, evaluation_result = evaluator_agent.simulate(prompt=candidate)
+
                     evaluation_token_usage = _estimate_usage(evaluation_new_messages).input_tokens + _estimate_usage(evaluation_new_messages).output_tokens
                     if evaluation_token_usage > self.max_context_segment:
                         self.max_context_segment = evaluation_token_usage
@@ -138,14 +141,21 @@ class GepaWrapper:
                     if self.debug:
                         log_response(f"[EVALUATOR] - {evaluation_result}")
                     else:
-                        log_response(f"[EVALUATOR] - {evaluation_result[:50]}...(more)")
+                        # log_response(f"[EVALUATOR] - {evaluation_result[:50]}...(more)")
+                        log_response(f"[EVALUATOR] - {evaluation_result}")
 
-                    # 2. Judge the quality of the simulated execution path against the original objective
                     progress_bar.title(titles["judge"])
-                    judge_new_messages, feedback = agent.judge(
-                        premise=objective,
-                        proposal=evaluation_result
+                    # 2. Judge the quality of the simulated execution path against the original objective
+                    # This judgement supposes the problem is in the reflection and the evaluator is right
+                    judge_new_messages, feedback = judge_agent.judge_reflection(
+                        # instructions=objective,
+                        instructions=candidate,
+                        outcome=evaluation_result
                     )
+                    # judge_new_messages, feedback = judge_agent.judge_evaluation(
+                    #     premise=objective,
+                    #     proposal=evaluation_result
+                    # )
                     judge_token_usage = _estimate_usage(judge_new_messages)
                     self.token_count += judge_token_usage.input_tokens + judge_token_usage.output_tokens
                     # 2.1. Stabilize JSON feedback from LLM
@@ -185,22 +195,32 @@ class GepaWrapper:
                     }
 
             # This is the actual optimization call, that uses the above local evaluation function
+            merger_agent = AgentWrapper(debug=self.debug)
+            _, merged_seed = merger_agent.merge(current=seed_text, inbound=objective)
+            # if not seed_text:   # optimize with gepa only if seed is new
             gepa_results = self.opinionated_optimize_anything(
                 evaluator=evaluate_configuration,
                 objective=f"Refine current AI Agent instructions to solve the class of problems incorporating the following information: {objective}",
-                seed_candidate=seed_text,
+                # seed_candidate=seed_text,
+                seed_candidate=merged_seed,   # pre-merge user prompt into seed
             )
+            best_candidate = gepa_results.best_candidate
+            best_score = gepa_results.val_aggregate_scores[gepa_results.best_idx]
+            # else:
+            #     # Quick shortcut to naive merge the objective into the existing seed
+            #     best_candidate = objective
+            #     best_score = 100
 
             # The following step is crucial to mitigate information loss in repeated optimizations
             if seed_text:
                 # If previous seed existed, merge seed and GEPA optimization results
                 progress_bar.title(titles["merger"])
-                agent = AgentWrapper(lm=self.model_string, debug=self.debug)
-                _, merger = agent.merge(current=seed_text, inbound=gepa_results.best_candidate)
-                return merger, gepa_results.val_aggregate_scores[gepa_results.best_idx]
+                # agent = AgentWrapper(debug=self.debug)
+                _, merger = merger_agent.merge(current=seed_text, inbound=best_candidate)
+                return merger, best_score
             else:
                 # We get here if there was no original seed, just return the optimized prompt as is.
-                return gepa_results.best_candidate, gepa_results.val_aggregate_scores[gepa_results.best_idx]
+                return best_candidate, best_score
 
     def opinionated_optimize_anything(
         self,

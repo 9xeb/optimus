@@ -53,10 +53,10 @@ async def ensure_tool_approval(
 ) -> dict[str, Any]:
     """
     Agent hook that calls the tool approval function bundled in the AgentDeps.
-    Tool approval is called only if the tool is not marked as read_only in its metadata.
+    Tool approval is called only if the tool is marked as to_approve in its metadata.
     """
     try:
-        if not tool_def.metadata.get("read_only"):
+        if not tool_def.metadata.get("to_approve"):
             log_internal_event(f"{ctx.deps.log_prefix} - TOOL APPROVAL REQUIRED - {call.tool_name}({args})")
             # Ask for human confirmation using the provided approval function
             user_approved = await ctx.deps.tool_approval_function(ctx, call.tool_name, args)
@@ -95,16 +95,19 @@ async def log_tool_result(
         print_output_limit = 200
         # agent_output_limit = 5000
         # truncated_result = f"{result[:agent_output_limit+1]} {"[... truncated due to exceeding output size limits. Try filtering or grepping.]" if len(result) > agent_output_limit else ""}"
-        log_tool_response(f'{ctx.deps.log_prefix}{call.tool_name}\n{result[:print_output_limit]}{" [... truncated]" if len(result) > print_output_limit else ""}')
+        if result is not None and len(result) > print_output_limit:
+            log_tool_response(f'{ctx.deps.log_prefix}{call.tool_name}\n{result[:print_output_limit]}[... truncated]')
+        else:
+            log_tool_response(f"{ctx.deps.log_prefix}{call.tool_name} - {result}")
     except Exception as e:
-        # Don't let exceptions propagate - they cause retries  
+        # Don't let exceptions propagate - they cause retries
         log_error(f"{ctx.deps.log_prefix} - after_tool_execute hook error: {e}")
     # agent_output_limit = 5000
     # truncated_result = f"{result[:agent_output_limit+1]} {"[... truncated due to exceeding output size limits. Try filtering or grepping.]" if len(result) > agent_output_limit else ""}"
     return result
 
-# Model request logging  
-@hooks.on.before_model_request  
+# Model request logging
+@hooks.on.before_model_request
 async def log_before_request(ctx: RunContext[AgentDeps], request_context):
     """
     Log prompt before executing it if verbose flag is set in AgentDeps
@@ -128,7 +131,7 @@ async def log_before_request(ctx: RunContext[AgentDeps], request_context):
         log_error(f"{ctx.deps.log_prefix} - before_model_request hook error: {e}")
     return request_context
 
-@hooks.on.after_model_request  
+@hooks.on.after_model_request
 async def log_after_response(ctx: RunContext[AgentDeps], *, request_context, response):
     """
     Log final agent response if verbose flag is set in AgentDeps
@@ -175,18 +178,34 @@ class AgentWrapper:
         - judging relevance of a string to another
         - merging information contained in two strings
     """
-    def __init__(self, lm: str, thinking: bool = True, debug: bool = False):
-        self.client = initialize_openai_client(lm)
+    def __init__(self, enable_mcp_toolsets: bool = False, thinking: bool = True, debug: bool = False):
+        self.client = initialize_openai_client(os.environ["OPENAI_API_MODEL"])
         self.thinking = thinking
         self.deps = AgentDeps(
-            log_prefix="OPTIMUS -",
+            log_prefix="OPTIMUS",
             verbose=debug,
             tool_approval_function=default_tool_approval_function
         )
+        self.history = []       # simple list of messages used in stateful conversation
 
+        # Initialie MCP toolsets (with disabled approval for now)
         self.mcp_path = os.environ["HOME"]+'/'+".optimus/mcp.json"
-        self.mcp_toolsets = load_mcp_servers(self.mcp_path) if os.path.exists(self.mcp_path) else []
-        # self.mcp_toolsets = load_mcp_servers(os.environ["MCP_CONFIG"]) if os.environ.get("MCP_CONFIG") else []
+        if enable_mcp_toolsets and os.path.exists(self.mcp_path):
+            self.mcp_toolsets = [
+                toolset.with_metadata(to_approve=True)
+                for toolset in load_mcp_servers(self.mcp_path)
+            ]
+        else:
+            self.mcp_toolsets = []
+        #     log_error(f"Ignoring MCP configuration in {self.mcp_path}")
+
+        # self.tool_count = [
+        #     toolset.get_tools()
+        #     for toolset in self.mcp_toolsets
+        # ]
+        # tools = await self.mcp_toolsets.get_tools(ctx)
+        # tool_count = len(tools)
+        log_internal_event(f"TOOLS - {self.mcp_toolsets}")
 
     async def async_step(
         self,
@@ -240,7 +259,7 @@ class AgentWrapper:
             ) as result:
                 if stream:
                     # Stream output tokens one by one
-                    async for text in result.stream_text():
+                    async for text in result.stream_text(delta=True):
                         print(text)
                 # Collect results
                 output = await result.get_output()
@@ -330,10 +349,13 @@ class AgentWrapper:
             user_prompt=prompt,
             # tools=[],     # these are read by AgentWrapper class from ~/.optimus/mcp.json
         )
-    
-    def judge(self, premise: str, proposal: str):
+
+    def judge_evaluation(self, premise: str, proposal: str):
         """
         Rate how well a proposed string incorporates information contained in a premise string.
+        This is mostly used to assess the quality of an execution path from the evaluator.
+
+        This assumes the premise from the reflection is right, and the proposal from the evaluator is wrong.
 
         Args:
             premise: a string containing a premise in natural language. Facts, statements, information.
@@ -361,6 +383,46 @@ class AgentWrapper:
 
             # PREMISE
             {premise}
+            """,
+            tools=[
+                # Tool(ask_human_expert, takes_ctx=False, metadata={'read_only': True})
+            ],
+            # history=evaluation_new_messages,
+        )
+
+    def judge_reflection(self, instructions: str, outcome: str):
+        """
+        Rate how well the instructions incorporate information contained in the outcome.
+        This is mostly used to create a feedback loop from the evaluator back to the reflection.
+
+        This assumes the problem is in the instructions (a.k.a. prompt), the reflection is wrong and the evaluator is right.
+
+        Args:
+            instructions: a string containing insructions in natural language. Facts, statements, information.
+            outcome: a string containing a proposal to test againts the premise. Instructions, execution paths, procedures.
+        """
+        return self.step(
+            task="""
+            # YOUR ROLE
+            You are the Judge.
+            Rate how well the INSTRUCTIONS predict the OUTCOME. Valid INSTRUCTIONS account for the OUTCOME, especially corner cases and tool failures.
+            """,
+            response_format="""
+            # YOUR OUTPUT FORMAT
+            Output format in JSON:
+            {{"critique": "... (how to fix the INSTRUCTIONS to predict the OUTCOME)", "score": "between 0 and 100"}}
+            Return ONLY valid JSON.
+            Escape all quotes inside string values.
+            Escape all backslashes.
+            Do not include markdown fences.
+            """,
+            user_prompt=f"""
+
+            # INSTRUCTIONS
+            {instructions}
+
+            # OUTCOME
+            {outcome}
             """,
             tools=[
                 # Tool(ask_human_expert, takes_ctx=False, metadata={'read_only': True})
@@ -397,6 +459,33 @@ class AgentWrapper:
             # history=evaluation_new_messages,
         )
 
+    async def chat(self, prompt: str):
+        """
+        Simple, stateful conversation with MCP capable agent. Mainly used for debugging tools.
+        Remembers previous message history internally.
+
+        Args:
+            prompt: input message to trigger the agent
+        
+        Returns:
+            response: last message of the agent
+        """
+        new_messages, response = await self.async_step(
+            task="",                # system prompt
+            response_format="",     # response format appended to system prompt
+            user_prompt=prompt,
+            tools=[],               # optional additional tools on top of MCP tools
+            history=self.history,   # remember history for chat mode
+            stream=True             # live logging of streaming messages to stdout
+        )
+        self.history += [new_messages]
+        return response
+
+    def clear_chat(self):
+        """
+        Delete all memories of the stateful conversation
+        """
+        self.history = []
 
     # def list_tool_calls(self, messages: list[ModelMessage]):
     #     tool_calls = [
