@@ -168,6 +168,7 @@ parser = argparse.ArgumentParser(
 # parser.add_argument('-c', '--criteria', help='criteria', action='append')
 # parser.add_argument('-d', '--debug', action='store_true', help='enable debug output')
 parser.add_argument('-c', '--chat', action='store_true', help='enable chat mode')
+parser.add_argument('-l', '--learn', action='store_true', help='enable learn mode')
 # parser.add_argument('-s', '--scope', help='scope to call', required=True)
 args = parser.parse_args()
 
