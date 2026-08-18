@@ -15,6 +15,8 @@ from src.log import log_error, log_internal_event, log_request, log_response, lo
 # Suppress verbose LiteLLM logging
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 logging.getLogger("litellm").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("mcp").setLevel(logging.WARNING)
 
 class GepaWrapper:
     """
@@ -54,7 +56,7 @@ class GepaWrapper:
         """
         seed_name = seed["name"]
         seed_text = seed["prompt"]
-        objective = objective + ".\n" + self.concision_clause
+        # objective = objective + ".\n" + self.concision_clause
         titles = {
             "optimus": "[OPTIMUS] - Preparing experiments...",
             "evaluator": "[EVALUATOR] - Simulating execution path...",
@@ -89,25 +91,27 @@ class GepaWrapper:
             #     """
             #     return input(f"#####\n{question}\n#####\n> ")
 
-            # async def bash(cmd: str):
-            #     """
-            #     Send bash instructions to run. Any command is supported.
-            
-            #     Args:
-            #         cmd: command or script to run
-            #     """
-            #     # This is actually a simulated command output
-            #     # log_tool_request(f"[OPTIMUS] - Simulating tool output")
-            #     agent = AgentWrapper(lm=self.model_string, debug=self.debug)
-            #     _, response = await agent.async_step(
-            #         task=f"""
-            #         Simulate the output of the provided command for the following scenario: {objective}.
-            #         """,
-            #         response_format="Only provide the command output.",
-            #         user_prompt=cmd
-            #     )
-            #     log_tool_response(f"[OPTIMUS] - {response[:100]}...")
-            #     return response
+            def propose_configuration(candidate, reflective_dataset, components_to_update, *, metadata=None) -> dict[str, str]:
+                """
+                Custom reflection callback. The only way to exert control over what comes out in the candidates.
+                """
+                log_error("CUSTOM REFLECTION")
+                new_candidate = {}
+                for component in components_to_update:
+                    simulations = ""
+                    for record in reflective_dataset[component]:
+                        # objective = record["objective"]
+                        fix = record["fix_this_in_instructions"]
+
+                        merger_agent = AgentWrapper(name="MERGER", enable_mcp_toolsets=True, simulated=True)
+                        progress_bar.title(titles["merger"])
+                        merged_candidate = merger_agent.merge(current=candidate, inbound=fix)      # merge old candidate with fix
+                        progress_bar.title(titles["evaluator"])
+                        evaluator_agent = AgentWrapper(name="EVALUATOR", enable_mcp_toolsets=True, simulated=True)
+                        _, simulation = evaluator_agent.simulate(merged_candidate)
+                        simulations += simulation
+                    new_candidate[component] = simulations
+                return new_candidate
 
             def evaluate_configuration(candidate: str):
                 """
@@ -120,41 +124,47 @@ class GepaWrapper:
                 Returns:
                     A score between 0 and 100, and the Judge's feedback to steer the Reflection.
                 """
-                if self.debug:
-                    log_request(f"[REFLECTION] - {candidate}")
-                else:
-                    log_request(f"[REFLECTION] - {candidate[:50]}...(more)")
+                # if self.debug:
+                #     log_request(f"[REFLECTION] - {candidate}")
+                # else:
+                #     log_request(f"[REFLECTION] - {candidate[:50]}...(more)")
 
                 try:
-                    evaluator_agent = AgentWrapper(enable_mcp_toolsets=True, debug=self.debug)  # with access MCP toolsets for performing operations
-                    judge_agent = AgentWrapper(debug=self.debug)
+                    # # 1. Evaluate the candidate via simulated execution paths
+                    # # progress_bar.title(titles["evaluator"])     # this changes progress bar title
+                    # evaluator_agent = AgentWrapper(
+                    #     name="EVALUATOR",
+                    #     enable_mcp_toolsets=True,
+                    #     simulated=True,
+                    #     debug=self.debug
+                    # )  # with access MCP toolsets for performing operations
+                    # evaluation_new_messages, evaluation_result = evaluator_agent.simulate(prompt=candidate)
+                    # evaluation_token_usage = _estimate_usage(evaluation_new_messages).input_tokens + _estimate_usage(evaluation_new_messages).output_tokens
+                    # if evaluation_token_usage > self.max_context_segment:
+                    #     self.max_context_segment = evaluation_token_usage
+                    # self.token_count += evaluation_token_usage
+                    # # if self.debug:
+                    # #     log_response(f"[EVALUATOR] - {evaluation_result}")
+                    # # else:
+                    # #     log_response(f"[EVALUATOR] - {evaluation_result[:50]}...(more)")
+                    # #     # log_response(f"[EVALUATOR] - {evaluation_result}")
 
-                    progress_bar.title(titles["evaluator"])     # this changes progress bar title
-
-                    # 1. Evaluate the candidate via simulated execution paths
-                    evaluation_new_messages, evaluation_result = evaluator_agent.simulate(prompt=candidate)
-
-                    evaluation_token_usage = _estimate_usage(evaluation_new_messages).input_tokens + _estimate_usage(evaluation_new_messages).output_tokens
-                    if evaluation_token_usage > self.max_context_segment:
-                        self.max_context_segment = evaluation_token_usage
-                    self.token_count += evaluation_token_usage
-                    if self.debug:
-                        log_response(f"[EVALUATOR] - {evaluation_result}")
-                    else:
-                        # log_response(f"[EVALUATOR] - {evaluation_result[:50]}...(more)")
-                        log_response(f"[EVALUATOR] - {evaluation_result}")
-
-                    progress_bar.title(titles["judge"])
                     # 2. Judge the quality of the simulated execution path against the original objective
                     # This judgement supposes the problem is in the reflection and the evaluator is right
+                    progress_bar.title(titles["judge"])
+                    judge_agent = AgentWrapper(name="JUDGE", enable_mcp_toolsets=True, simulated=True, debug=self.debug)
                     judge_new_messages, feedback = judge_agent.judge_reflection(
                         # instructions=objective,
+                        # instructions=candidate,
+                        # outcome=evaluation_result
                         instructions=candidate,
-                        outcome=evaluation_result
+                        outcome=objective
                     )
+                    # This judgement supposes the problem is in the evaluator's interpretation
                     # judge_new_messages, feedback = judge_agent.judge_evaluation(
                     #     premise=objective,
-                    #     proposal=evaluation_result
+                    #     proposal=candidate
+                    #     # proposal=evaluation_result
                     # )
                     judge_token_usage = _estimate_usage(judge_new_messages)
                     self.token_count += judge_token_usage.input_tokens + judge_token_usage.output_tokens
@@ -164,11 +174,17 @@ class GepaWrapper:
                         expected_keys = ["critique"]
                     )
                     score = float(stable_feedback["score"])
-                    if self.debug:
-                        log_response(f"[JUDGE] - {stable_feedback["critique"]}")
-                    else:
-                        log_response(f"[JUDGE] - {stable_feedback["critique"][:50]}...(more)")
-                    log_response(f"[JUDGE] - {score}/100.0")
+                    # if self.debug:
+                    #     log_response(f"[JUDGE] - {stable_feedback["critique"]}")
+                    # else:
+                    #     log_response(f"[JUDGE] - {stable_feedback["critique"][:50]}...(more)")
+                    # log_response(f"[JUDGE] - {score}/100.0")
+
+                    # # 2 (alt). Human is the judge in the loop (HITL) - nudges tool call chains during learning
+                    # with progress_bar.pause():
+                    #     stable_feedback = {}
+                    #     stable_feedback["critique"] = input("NUDGE > ")
+                    #     score = float(input("SCORE (0-100) > "))
                     
                     # 3. Return score and ASI (feedback)
                     if score > self.best_score:
@@ -179,9 +195,10 @@ class GepaWrapper:
                         "scores": {
                             "score": score
                         },
-                        # "artifact": candidate,
-                        "fix_this_in_instructions": stable_feedback["critique"],
-                        "remark": "When fixing instructions, do not lose previous information. Merge instead of replace."
+                        # "original_objective": objective,                            # remind reflection what the objective is
+                        "objective": f"Refine current AI Agent instructions to solve the class of problems incorporating the following information: {objective}",
+                        "fix_this_in_instructions": stable_feedback["critique"],    # nudge reflection with judge critique
+                        # "remark": "When fixing instructions, do not lose previous information. Merge instead of replace."
                     }
                 except Exception as e:
                     # In case of exceptions (broken JSONs, unreachable APIs, ...) fallback to a low score
@@ -195,14 +212,16 @@ class GepaWrapper:
                     }
 
             # This is the actual optimization call, that uses the above local evaluation function
-            merger_agent = AgentWrapper(debug=self.debug)
-            _, merged_seed = merger_agent.merge(current=seed_text, inbound=objective)
+            # progress_bar.title(titles["merger"])
+            merger_agent = AgentWrapper(name="MERGER", debug=self.debug)
+            # _, merged_seed = merger_agent.merge(current=seed_text, inbound=objective)
             # if not seed_text:   # optimize with gepa only if seed is new
             gepa_results = self.opinionated_optimize_anything(
+                reflection=propose_configuration,
                 evaluator=evaluate_configuration,
                 objective=f"Refine current AI Agent instructions to solve the class of problems incorporating the following information: {objective}",
-                # seed_candidate=seed_text,
-                seed_candidate=merged_seed,   # pre-merge user prompt into seed
+                seed_candidate=seed_text,
+                # seed_candidate=merged_seed,   # pre-merge user prompt into seed
             )
             best_candidate = gepa_results.best_candidate
             best_score = gepa_results.val_aggregate_scores[gepa_results.best_idx]
@@ -224,6 +243,7 @@ class GepaWrapper:
 
     def opinionated_optimize_anything(
         self,
+        reflection,
         evaluator,
         objective: str,
         seed_candidate: str = None,
@@ -272,13 +292,14 @@ class GepaWrapper:
                     cache_evaluation=True,                       # Reuse redundant evaluations
                     raise_on_exception=True,                     # Continue on errors instead of stopping
                     # run_dir=self.run_dir,                        # Persistent GEPA state
-                    # display_progress_bar=True,
+                    display_progress_bar=False,
                 ),
                 reflection=ReflectionConfig(
                     reflection_lm=self.model_string,
                     reflection_minibatch_size=1,      # Reduce from default 3 to lower memory usage
                     perfect_score=100.0,
-                    skip_perfect_score=True           # Skip unnecessary evaluations
+                    skip_perfect_score=True,          # Skip unnecessary evaluations
+                    custom_candidate_proposer=reflection
                 ),
                 stop_callbacks=[
                     NoImprovementStopper(max_iterations_without_improvement=2),   # Stop when plateau

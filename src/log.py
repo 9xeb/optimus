@@ -21,10 +21,19 @@ BOLD_RED = "\x1b[31;1m"
 logging.basicConfig(
     stream=sys.stdout,
     level=logging.INFO,
-    format='%(asctime)s - %(message)s'
+    format='%(message)s'
+    # format='%(asctime)s - %(message)s'
     # format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
+def color_print(message, color=GREY):
+    print(color + message + "\x1b[0m", end="", flush=True)
+
+def log_info(message, color=GREY):
+    """
+    Generic message logging with custom color option
+    """
+    logging.log(logging.INFO, color + message + "\x1b[0m")
 
 def log(message, level=logging.DEBUG, color=GREY):
     logging.log(level, color + message + "\x1b[0m")

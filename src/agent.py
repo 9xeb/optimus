@@ -2,6 +2,8 @@ import hashlib
 import json
 import pickle
 import os
+import asyncio
+
 from typing import Any, Optional, Self
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -14,7 +16,7 @@ from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.mcp import load_mcp_servers
 
 from src.utils import initialize_openai_client
-from src.log import log_tool_request, log_error, log_internal_event, log_request, log_part, log_tool_response
+from src.log import log_tool_request, log_error, log_internal_event, log_request, log_part, log_tool_response, color_print
 
 @dataclass
 class AgentDeps:
@@ -24,6 +26,7 @@ class AgentDeps:
     """
     log_prefix: str
     verbose: bool
+    simulated: bool
     # tool approval function takes (ctx, tool_name, args) -> bool. Defaults to returning always true
     tool_approval_function: Optional[Callable[[RunContext[Self], str, dict[str, Any]], bool]] = None
     # lambda tool_name, args: True
@@ -55,6 +58,9 @@ async def ensure_tool_approval(
     Agent hook that calls the tool approval function bundled in the AgentDeps.
     Tool approval is called only if the tool is marked as to_approve in its metadata.
     """
+    if ctx.deps.simulated:
+        raise SkipToolExecution(result="This is a placeholder tool output for the purpose of the simulation.")
+
     try:
         if not tool_def.metadata.get("to_approve"):
             log_internal_event(f"{ctx.deps.log_prefix} - TOOL APPROVAL REQUIRED - {call.tool_name}({args})")
@@ -178,12 +184,14 @@ class AgentWrapper:
         - judging relevance of a string to another
         - merging information contained in two strings
     """
-    def __init__(self, enable_mcp_toolsets: bool = False, thinking: bool = True, debug: bool = False):
+    def __init__(self, name: str, enable_mcp_toolsets: bool = False, simulated: bool = False, thinking: bool = True, debug: bool = False):
         self.client = initialize_openai_client(os.environ["OPENAI_API_MODEL"])
         self.thinking = thinking
         self.deps = AgentDeps(
-            log_prefix="OPTIMUS",
+            # log_prefix="OPTIMUS",
+            log_prefix=name,
             verbose=debug,
+            simulated=simulated,
             tool_approval_function=default_tool_approval_function
         )
         self.history = []       # simple list of messages used in stateful conversation
@@ -258,9 +266,17 @@ class AgentWrapper:
                 usage_limits=UsageLimits(tool_calls_limit=20)
             ) as result:
                 if stream:
+                    from src.log import GREEN, CYAN, GREY, MAGENTA
+                    color_map = {
+                        "JUDGE": MAGENTA,
+                        "EVALUATOR": CYAN,
+                        "REFLECTION": GREEN,
+                        "MERGER": CYAN,
+                    }
                     # Stream output tokens one by one
                     async for text in result.stream_text(delta=True):
-                        print(text)
+                        color_print(text, color=color_map[self.deps.log_prefix])
+                        # print(text)
                 # Collect results
                 output = await result.get_output()
                 return result.new_messages(), output
@@ -343,12 +359,14 @@ class AgentWrapper:
         Args:
             prompt: string containing instructions for an AI Agent
         """
-        return self.step(
+        return asyncio.run(self.async_step(
             task="Simulate an execution path with a list of tool calls to solve the user's problem.",
             response_format="OUTPUT FORMAT\nBrief bullet point list of tool calls with possible scenarios. Single paragraph.",
             user_prompt=prompt,
+            stream=True,
             # tools=[],     # these are read by AgentWrapper class from ~/.optimus/mcp.json
-        )
+        ))
+
 
     def judge_evaluation(self, premise: str, proposal: str):
         """
@@ -361,7 +379,7 @@ class AgentWrapper:
             premise: a string containing a premise in natural language. Facts, statements, information.
             proposal: a string containing a proposal to test againts the premise. Instructions, execution paths, procedures.
         """
-        return self.step(
+        return asyncio.run(self.async_step(
             task="""
             # YOUR ROLE
             You are the Judge. 
@@ -384,11 +402,12 @@ class AgentWrapper:
             # PREMISE
             {premise}
             """,
-            tools=[
-                # Tool(ask_human_expert, takes_ctx=False, metadata={'read_only': True})
-            ],
-            # history=evaluation_new_messages,
-        )
+            stream=True,
+            # tools=[
+            #     # Tool(ask_human_expert, takes_ctx=False, metadata={'read_only': True})
+            # ],
+            # # history=evaluation_new_messages,
+        ))
 
     def judge_reflection(self, instructions: str, outcome: str):
         """
@@ -401,7 +420,7 @@ class AgentWrapper:
             instructions: a string containing insructions in natural language. Facts, statements, information.
             outcome: a string containing a proposal to test againts the premise. Instructions, execution paths, procedures.
         """
-        return self.step(
+        return asyncio.run(self.async_step(
             task="""
             # YOUR ROLE
             You are the Judge.
@@ -424,11 +443,12 @@ class AgentWrapper:
             # OUTCOME
             {outcome}
             """,
-            tools=[
-                # Tool(ask_human_expert, takes_ctx=False, metadata={'read_only': True})
-            ],
+            stream=True,
+            # tools=[
+            #     # Tool(ask_human_expert, takes_ctx=False, metadata={'read_only': True})
+            # ],
             # history=evaluation_new_messages,
-        )
+        ))
 
     def merge(self, current: str, inbound: str):
         """
@@ -438,7 +458,7 @@ class AgentWrapper:
             current: a string containing current information
             inbound: a string containing new information to merge
         """
-        return self.step(
+        return asyncio.run(self.async_step(
             task="""
             # YOUR ROLE
             You are the Information Merger.
@@ -453,11 +473,12 @@ class AgentWrapper:
             # INBOUND
             {inbound}
             """,
-            tools=[
-                # Tool(ask_human_expert, takes_ctx=False, metadata={'read_only': True})
-            ],
-            # history=evaluation_new_messages,
-        )
+            stream=True,
+            # tools=[
+            #     # Tool(ask_human_expert, takes_ctx=False, metadata={'read_only': True})
+            # ],
+            # # history=evaluation_new_messages,
+        ))
 
     async def chat(self, prompt: str):
         """
