@@ -6,8 +6,41 @@ from json_repair import repair_json
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
+from pydantic_ai.models.function import _estimate_usage
 
 from src.log import log_internal_event
+
+def count_tokens(new_messages):
+    """
+    Return estimated token count from a list of Agent messages
+
+    Args:
+        new_messages: a list of ModelMessage
+    
+    Returns:
+        an integer with the token count
+    """
+    estimate = _estimate_usage(new_messages)
+    return estimate.input_tokens + estimate.output_tokens
+
+def extract_execution_path(new_messages):
+    """
+    Extract tool call execution path in pretty format
+
+    Args:
+        new_messages: list of ModelMessage
+
+    Returns:
+        a structured execution path 
+    """
+    execution_path = {}
+    for message in new_messages:
+        for part in message.parts:
+            if part.part_kind == "tool-call":
+                execution_path[part.tool_call_id] = {"tool": part.tool_name, "args": part.args}
+            elif part.part_kind == "tool-return":
+                execution_path[part.tool_call_id] = execution_path[part.tool_call_id] | {"status": part.content}
+    return execution_path
 
 def initialize_openai_client(model_string: str, temperature: float = 0.0):
     """
@@ -16,7 +49,7 @@ def initialize_openai_client(model_string: str, temperature: float = 0.0):
     # Extract provider and model name
     model_provider = model_string.split('/')[0]
     model_name = model_string.split('/', 1)[1]
-    log_internal_event(f"Initializing model: {model_provider}/{model_name}")
+    # log_internal_event(f"Initializing model: {model_provider}/{model_name}")
     if model_provider == "openai":
         # Override openai provider to support custom endpoints
         provider = OpenAIProvider(

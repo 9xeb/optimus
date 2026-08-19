@@ -15,7 +15,7 @@ from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.mcp import load_mcp_servers
 
-from src.utils import initialize_openai_client
+from src.utils import initialize_openai_client, stabilize_json
 from src.log import log_tool_request, log_error, log_internal_event, log_request, log_part, log_tool_response, color_print
 
 @dataclass
@@ -205,7 +205,8 @@ class AgentWrapper:
             ]
         else:
             self.mcp_toolsets = []
-        #     log_error(f"Ignoring MCP configuration in {self.mcp_path}")
+            if enable_mcp_toolsets:
+                log_error(f"Empty MCP toolset: {self.mcp_path}")
 
         # self.tool_count = [
         #     toolset.get_tools()
@@ -213,7 +214,7 @@ class AgentWrapper:
         # ]
         # tools = await self.mcp_toolsets.get_tools(ctx)
         # tool_count = len(tools)
-        log_internal_event(f"TOOLS - {self.mcp_toolsets}")
+        # log_internal_event(f"TOOLS - {self.mcp_toolsets}")
 
     async def async_step(
         self,
@@ -269,9 +270,10 @@ class AgentWrapper:
                     from src.log import GREEN, CYAN, GREY, MAGENTA
                     color_map = {
                         "JUDGE": MAGENTA,
-                        "EVALUATOR": CYAN,
+                        "EVALUATOR": GREEN,
                         "REFLECTION": GREEN,
                         "MERGER": CYAN,
+                        "AGENT": GREEN,
                     }
                     # Stream output tokens one by one
                     async for text in result.stream_text(delta=True):
@@ -367,6 +369,39 @@ class AgentWrapper:
             # tools=[],     # these are read by AgentWrapper class from ~/.optimus/mcp.json
         ))
 
+    def act(self, system_prompt: str, prompt: str):
+        """
+        Act on the environment with a given system_prompt and prompt.
+        Especially focus on what does not work.
+
+        Args:
+            prompt: string containing instructions for an AI Agent
+        """
+        return asyncio.run(self.async_step(
+            # task="Simulate an execution path with a list of tool calls to solve the user's problem.",
+            # task="Execute the INSTRUCTIONS. Report what did not work and why.",
+            task=system_prompt,
+            response_format="Your system prompt is the ONLY source of truth for providing answers and performing actions.",
+            # response_format="OUTPUT FORMAT\nBrief bullet point list of tool calls that failed despite the INSTRUCTIONS.",
+            user_prompt=prompt,
+            # stream=True,
+            # tools=[],     # these are read by AgentWrapper class from ~/.optimus/mcp.json
+        ))
+
+    def recap(self, history):
+        """
+        Compile a recap on the execution path, given a message history.
+
+        Args:
+            history: a list of ModelMessage to analyze
+        """
+        return asyncio.run(self.async_step(
+            task="You are an AI assistant with powerful context analysis and summarization abilities.",
+            response_format="",
+            user_prompt="Be completely honest. Provide the tools execution path followed so far in a short bullet point list.",
+            stream=True,
+            history=history
+        ))
 
     def judge_evaluation(self, premise: str, proposal: str):
         """
@@ -420,16 +455,17 @@ class AgentWrapper:
             instructions: a string containing insructions in natural language. Facts, statements, information.
             outcome: a string containing a proposal to test againts the premise. Instructions, execution paths, procedures.
         """
-        return asyncio.run(self.async_step(
+        # 1. Suggest fix
+        feedback_new_messages, feedback = asyncio.run(self.async_step(
             task="""
             # YOUR ROLE
-            You are the Judge.
-            Rate how well the INSTRUCTIONS predict the OUTCOME. Valid INSTRUCTIONS account for the OUTCOME, especially corner cases and tool failures.
+            You are the JUDGE.
+            Rate how well an AI Agent with the INSTRUCTIONS would be able to predict the OUTCOME. Valid INSTRUCTIONS account for the OUTCOME.
             """,
             response_format="""
-            # YOUR OUTPUT FORMAT
+            # YOUR OUTPUT FORMAT AS JUDGE
             Output format in JSON:
-            {{"critique": "... (how to fix the INSTRUCTIONS to predict the OUTCOME)", "score": "between 0 and 100"}}
+            {{"fix": "... (suggested fix for INSTRUCTIONS)", "score": "between 0 and 100"}}
             Return ONLY valid JSON.
             Escape all quotes inside string values.
             Escape all backslashes.
@@ -444,11 +480,48 @@ class AgentWrapper:
             {outcome}
             """,
             stream=True,
-            # tools=[
-            #     # Tool(ask_human_expert, takes_ctx=False, metadata={'read_only': True})
-            # ],
-            # history=evaluation_new_messages,
         ))
+        # 1.1. Stabilize JSON feedback from LLM
+        stable_feedback = stabilize_json(
+            unstable_string = feedback,
+            expected_keys = ["fix", "score"]
+        )
+        return feedback_new_messages, {"fix": stable_feedback["fix"], "score": stable_feedback["score"]}
+
+        # # 2. Give score
+        # score_new_messages, score = asyncio.run(self.async_step(
+        #     task="""
+        #     # YOUR ROLE
+        #     You are the Judge.
+        #     Give a SCORE on 
+        #     Rate how well the INSTRUCTIONS predict the OUTCOME. Valid INSTRUCTIONS account for the OUTCOME, especially corner cases and tool failures.
+        #     """,
+        #     response_format="""
+        #     # YOUR OUTPUT FORMAT
+        #     Output format in JSON:
+        #     {{"explanation": "...", "score": "between 0 and 100"}}
+        #     Return ONLY valid JSON.
+        #     Escape all quotes inside string values.
+        #     Escape all backslashes.
+        #     Do not include markdown fences.
+        #     """,
+        #     user_prompt=f"""
+
+        #     # INSTRUCTIONS
+        #     {instructions}
+
+        #     # OUTCOME
+        #     {outcome}
+        #     """,
+        #     stream=True,
+        # ))
+        # # 1.1. Stabilize JSON feedback from LLM
+        # stable_score_feedback = stabilize_json(
+        #     unstable_string = score,
+        #     expected_keys = ["explanation", "score"]
+        # )
+
+        # return fix_new_messages + score_new_messages, {"fix": fix, "score": stable_score_feedback["score"]}
 
     def merge(self, current: str, inbound: str):
         """
@@ -462,7 +535,7 @@ class AgentWrapper:
             task="""
             # YOUR ROLE
             You are the Information Merger.
-            Given a CURRENT text and an INBOUND text, create a new text that incorporates information from INBOUND inside CURRENT.
+            Given a CURRENT text and an INBOUND text, create a new text that incorporates information from INBOUND inside CURRENT. INBOUND always wins over CURRENT when conflicts happen.
             """,
             response_format="",
             user_prompt=f"""
@@ -480,7 +553,35 @@ class AgentWrapper:
             # # history=evaluation_new_messages,
         ))
 
-    async def chat(self, prompt: str):
+    def compact(self, text: str):
+        """
+        Compact the text into a more dense alternative.
+        Convey the same amount of information in the most dense language possible
+
+        Args:
+            text: source test, to be compacted
+        """
+        return asyncio.run(self.async_step(
+            task="""
+            # YOUR ROLE
+            Given the INSTRUCTIONS, compact them to convey the same amount of information in the most dense language possible.
+            Reduce output token usage to a minimum, without substantial information loss.
+            """,
+            response_format="",
+            user_prompt=f"""
+            # INSTRUCTIONS
+            {text}
+            """,
+            stream=True,
+        ))
+
+    # def record_errors(self, new_messages):
+    #     """
+    #     Specifically find what DOES not work in the tool calls.
+    #     """
+    #     pass
+
+    def chat(self, prompt: str):
         """
         Simple, stateful conversation with MCP capable agent. Mainly used for debugging tools.
         Remembers previous message history internally.
@@ -491,14 +592,14 @@ class AgentWrapper:
         Returns:
             response: last message of the agent
         """
-        new_messages, response = await self.async_step(
+        new_messages, response = asyncio.run(self.async_step(
             task="",                # system prompt
             response_format="",     # response format appended to system prompt
             user_prompt=prompt,
             tools=[],               # optional additional tools on top of MCP tools
             history=self.history,   # remember history for chat mode
             stream=True             # live logging of streaming messages to stdout
-        )
+        ))
         self.history += [new_messages]
         return response
 

@@ -6,7 +6,7 @@ class TestAgent:
         """
         Test AgentWrapper constructor
         """
-        assert AgentWrapper(lm="openai/test")
+        assert AgentWrapper(name="TEST")
 
 class TestGepa:
     def test_init(self):
