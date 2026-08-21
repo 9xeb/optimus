@@ -10,6 +10,16 @@ from pydantic_ai.models.function import _estimate_usage
 
 from src.log import log_internal_event
 
+TITLES = {
+    "optimus": "[OPTIMUS] - Preparing experiments...",
+    "evaluator": "[EVALUATOR] - Simulating execution path...",
+    "reflection": "[REFLECTION] - Refining instructions...",
+    "judge": "[JUDGE] - Judging execution path...",
+    "merger": "[MERGER] - Merging instructions...",
+    "compactor": "[COMPACTOR] - Compacting instructions...",
+    "agent": "[AGENT] - Running instructions..."
+}
+
 def count_tokens(new_messages):
     """
     Return estimated token count from a list of Agent messages

@@ -9,7 +9,7 @@ from pydantic_ai import Tool
 from alive_progress import alive_bar
 
 from src.agent import AgentWrapper
-from src.utils import count_tokens, initialize_openai_client, stabilize_json
+from src.utils import TITLES, count_tokens, initialize_openai_client, stabilize_json
 from src.log import log_error, log_internal_event, log_request, log_response, log_tool_request, log_tool_response
 
 # Suppress verbose LiteLLM logging
@@ -27,7 +27,8 @@ class GepaWrapper:
         3. Judge comments on execution paths and sends back feedback to Reflection
     The system goes on until a plateau is reached (did not increase feedback score after N tries), or a score of 100 is reached.
     """
-    def __init__(self, debug: bool = False):
+    def __init__(self, progress_bar, debug: bool = False):
+        self.progress_bar = progress_bar
         # self.concision_clause = "(Avoid repetitions and verbose instructions. Minimize additional assumptions. Do not include information that you would be able to infer naturally.)"
         self.concision_clause = """
         # INSTRUCTIONS OUTPUT CONSTRAINTS
@@ -62,190 +63,174 @@ class GepaWrapper:
         Returns:
             A tuple containing the improved draft and its score.
         """
-        # seed_name = seed["name"]
-        # seed_text = seed["prompt"]
+        raw_objective = objective
         objective = objective + ".\n" + self.concision_clause   # override global objective with concision clause
-        titles = {
-            "optimus": "[OPTIMUS] - Preparing experiments...",
-            "evaluator": "[EVALUATOR] - Simulating execution path...",
-            "reflection": "[REFLECTION] - Refining instructions...",
-            "judge": "[JUDGE] - Judging execution path...",
-            "merger": "[MERGER] - Merging instructions...",
-            "compactor": "[COMPACTOR] - Compacting instructions..."
-        }
         self.best_score = 0
 
-        # Wrap inside the progress bar for pretty printing
-        with alive_bar(
-            total=100,
-            dual_line=True,
-            manual=True,
-            title_length=max([len(titles[title]) for title in titles])
-        ) as progress_bar:
-            progress_bar.title(titles["optimus"])
-            def propose_configuration(candidate, reflective_dataset = None, components_to_update = None, *, metadata=None) -> dict[str, str]:
-                """
-                Custom reflection callback. The only way to exert control over what comes out of the candidates.
-                """
-                try:
-                    new_candidate = {}
-                    # log_error(f"Components: {components_to_update}")
-                    # reflective_dataset["current_candidate"]
-                    for component in components_to_update:
-                        new_candidate[component] = ""
-                        # log_error(f"COMPONENT: {component}")
-                        for record in reflective_dataset[component]:
-                            # log_error(f"Record: {record}")
-                            # log_error(f"{candidate}")
-                            # objective = record["objective"]
-                            fix = record.get("fix_this_in_instructions")
+        self.progress_bar.title(TITLES["optimus"])
+        def propose_configuration(candidate, reflective_dataset = None, components_to_update = None, *, metadata=None) -> dict[str, str]:
+            """
+            Custom reflection callback. The only way to exert control over what comes out of the candidates.
+            """
+            try:
+                new_candidate = {}
+                # log_error(f"Components: {components_to_update}")
+                # reflective_dataset["current_candidate"]
+                for component in components_to_update:
+                    new_candidate[component] = ""
+                    # log_error(f"COMPONENT: {component}")
+                    for record in reflective_dataset[component]:
+                        # log_error(f"Record: {record}")
+                        # log_error(f"{candidate}")
+                        # objective = record["objective"]
+                        fix = record.get("fix_this_in_instructions")
 
-                            # 1. Merge previous candidate with fix from judge
-                            merger_agent = AgentWrapper(name="MERGER")
-                            progress_bar.title(titles["merger"])
-                            merger_new_messages, merged_candidate = merger_agent.merge( # merge old candidate with fix
-                                current=candidate["current_candidate"],
-                                inbound=objective+"\n"+fix    # Fix reminds of the objective: "generate AI agent instructions"
-                            )
-                            self.token_count += count_tokens(merger_new_messages)
-                            new_candidate[component] += merged_candidate
+                        # 1. Merge previous candidate with fix from judge
+                        reflection_agent = AgentWrapper(name="REFLECTION")
+                        self.progress_bar.title(TITLES["reflection"])
+                        merger_new_messages, merged_candidate = reflection_agent.merge( # merge old candidate with fix
+                            current=candidate["current_candidate"],
+                            inbound=objective+"\n"+fix    # Fix reminds of the objective: "generate AI agent instructions"
+                        )
+                        self.token_count += count_tokens(merger_new_messages)
+                        new_candidate[component] += merged_candidate
 
-                            # # # 2. Simulated execution path on candidate+fix is the new candidate, so it must be done in reflection instead of evaluation
-                            # progress_bar.title(titles["evaluator"])
-                            # evaluator_agent = AgentWrapper(
-                            #     name="EVALUATOR",
-                            #     enable_mcp_toolsets=True,
-                            #     # simulated=True
-                            # )
-                            # simulation_new_messages, simulation = evaluator_agent.simulate(merged_candidate)
-                            # self.token_count += count_tokens(simulation_new_messages)
+                        # # # 2. Simulated execution path on candidate+fix is the new candidate, so it must be done in reflection instead of evaluation
+                        # self.progress_bar.title(TITLES["evaluator"])
+                        # evaluator_agent = AgentWrapper(
+                        #     name="EVALUATOR",
+                        #     enable_mcp_toolsets=True,
+                        #     # simulated=True
+                        # )
+                        # simulation_new_messages, simulation = evaluator_agent.simulate(merged_candidate)
+                        # self.token_count += count_tokens(simulation_new_messages)
 
-                            # 3. Compact simulated execution path
-                            # progress_bar.title(titles["compactor"])
-                            # compactor_agent = AgentWrapper(name="COMPACTOR")
-                            # compaction_new_messages, compacted = compactor_agent.compact(merged_candidate)
-                            # self.token_count += count_tokens(compaction_new_messages)
+                        # 3. Compact simulated execution path
+                        # self.progress_bar.title(TITLES["compactor"])
+                        # compactor_agent = AgentWrapper(name="COMPACTOR")
+                        # compaction_new_messages, compacted = compactor_agent.compact(merged_candidate)
+                        # self.token_count += count_tokens(compaction_new_messages)
 
-                            # merges += compacted
-                except Exception as e:
-                    log_error(f"REFLECTION ERROR - {e}")
-                    return {"current_candidate": "Generic instructions."}
-                return new_candidate
+                        # merges += compacted
+            except Exception as e:
+                log_error(f"REFLECTION ERROR - {e}")
+                return {"current_candidate": "Generic instructions."}
+            return new_candidate
 
-            def evaluate_configuration(candidate: str):
-                """
-                Evaluation callback used by GEPA to assess and score candidates proposed by the Reflection.
-                Candidate prompts are simulated in execution paths by the Evaluator, and the execution is judged and scored.
+        def evaluate_configuration(candidate: str):
+            """
+            Evaluation callback used by GEPA to assess and score candidates proposed by the Reflection.
+            Candidate prompts are simulated in execution paths by the Evaluator, and the execution is judged and scored.
 
-                Args:
-                    candidate: a string coming from the Reflection
+            Args:
+                candidate: a string coming from the Reflection
 
-                Returns:
-                    A score between 0 and 100, and the Judge's feedback to steer the Reflection.
-                """
-                # if self.debug:
-                #     log_request(f"[REFLECTION] - {candidate}")
-                # else:
-                #     log_request(f"[REFLECTION] - {candidate[:50]}...(more)")
-                # log_response(f"#######\n{candidate}########")
+            Returns:
+                A score between 0 and 100, and the Judge's feedback to steer the Reflection.
+            """
+            # if self.debug:
+            #     log_request(f"[REFLECTION] - {candidate}")
+            # else:
+            #     log_request(f"[REFLECTION] - {candidate[:50]}...(more)")
+            # log_response(f"#######\n{candidate}########")
 
-                try:
-                    # # 1. Assess candidate+fix in the environment. Find what went wrong
-                    # progress_bar.title(titles["evaluator"])
-                    # evaluator_agent = AgentWrapper(
-                    #     name="EVALUATOR",
-                    #     enable_mcp_toolsets=True,
-                    #     # simulated=True
-                    # )
-                    # assesment_new_messages, assessment = evaluator_agent.assess(system_prompt=candidate, prompt=objective)
-                    # self.token_count += count_tokens(assesment_new_messages)
+            try:
+                # # 1. Assess candidate+fix in the environment. Find what went wrong
+                # self.progress_bar.title(TITLES["evaluator"])
+                # evaluator_agent = AgentWrapper(
+                #     name="EVALUATOR",
+                #     enable_mcp_toolsets=True,
+                #     # simulated=True
+                # )
+                # assesment_new_messages, assessment = evaluator_agent.assess(system_prompt=candidate, prompt=objective)
+                # self.token_count += count_tokens(assesment_new_messages)
+                agent = AgentWrapper(name="AGENT", enable_mcp_toolsets=True)
+                agent_new_messages, _ = agent.act(system_prompt=candidate, prompt=objective)
+                _, agent_recap = agent.recap(agent_new_messages)
 
-                    # 2. Judge the quality of the simulated execution path against the original objective
-                    # This judgement supposes the problem is in the reflection and the evaluator is right
-                    progress_bar.title(titles["judge"])
-                    judge_agent = AgentWrapper(name="JUDGE", enable_mcp_toolsets=True, simulated=True, debug=self.debug)
-                    judge_new_messages, feedback = judge_agent.judge_reflection(
-                        # instructions=objective,
-                        # instructions=candidate,
-                        # outcome=evaluation_result
-                        instructions=candidate,
-                        outcome=objective
-                        # outcome=assessment
-                    )
-                    # This judgement supposes the problem is in the evaluator's interpretation
-                    # judge_new_messages, feedback = judge_agent.judge_evaluation(
-                    #     premise=objective,
-                    #     proposal=candidate
-                    #     # proposal=evaluation_result
-                    # )
-                    self.token_count += count_tokens(judge_new_messages)
-                    # 1.1. Stabilize JSON feedback from LLM
-                    # stable_feedback = stabilize_json(
-                    #     unstable_string = feedback,
-                    #     expected_keys = ["fix"]
-                    # )
-                    # score = float(stable_feedback["score"])
-                    # if self.debug:
-                    #     log_response(f"[JUDGE] - {stable_feedback["critique"]}")
-                    # else:
-                    #     log_response(f"[JUDGE] - {stable_feedback["critique"][:50]}...(more)")
-                    # log_response(f"[JUDGE] - {score}/100.0")
-
-                    # # # 2 (alt). Human is the judge in the loop (HITL) - nudges tool call chains during learning
-                    # with progress_bar.pause():
-                    #     hitl = input("(Press Enter to confirm judgment, or write something) > ")
-                    #     stable_feedback["critique"] = hitl
-                    #     if hitl != "\n":
-                    #         score = float(input("Override score (0-100) > "))
-
-                    # 3. Return score and ASI (feedback)
-                    score = float(feedback["score"])
-                    if score > self.best_score:
-                        self.best_score = score
-                        progress_bar(score/100.0)       # Update progress bar
-                    progress_bar.title(titles["reflection"])
-                    return score, {
-                        "scores": {
-                            "score": score
-                        },
-                        # "original_objective": objective,                            # remind reflection what the objective is
-                        "objective": f"Refine current AI Agent instructions to solve the class of problems incorporating the following information: {objective}",
-                        "fix_this_in_instructions": feedback["fix"],    # nudge reflection with judge critique
-                        # "remark": "When fixing instructions, do not lose previous information. Merge instead of replace."
-                    }
-                except Exception as e:
-                    # In case of exceptions (broken JSONs, unreachable APIs, ...) fallback to a low score
-                    log_error(f"CRITICAL ERROR - GEPA EVALUATE FAILED - {e}")
-                    return 0.0, {
-                        "scores": {
-                            "score": 0.0
-                        },
-                        "artifact": candidate,
-                        "fix_this_in_instructions": f"Provided JSON is malformed. Hint to fix: {e}"
-                    }
-
-            # 1. Optimize SEED to incorporate OBJECTIVE
-            if seed is None:
-                # Optimization from scratch with GEPA
-                gepa_results = self.opinionated_optimize_anything(
-                    reflection=propose_configuration,
-                    evaluator=evaluate_configuration,
-                    objective=f"Refine current AI Agent instructions to solve the class of problems incorporating the following information: {objective}",
-                    seed_candidate=seed,       # If seed is 100% good then the objective is known in memory and GEPA is mostly skipped
+                # 2. Judge the quality of the simulated execution path against the original objective
+                # This judgement supposes the problem is in the reflection and the evaluator is right
+                self.progress_bar.title(TITLES["judge"])
+                judge_agent = AgentWrapper(name="JUDGE", enable_mcp_toolsets=True, simulated=True, debug=self.debug)
+                judge_new_messages, feedback = judge_agent.judge_reflection(
+                    # instructions=candidate,
+                    # outcome=objective
+                    instructions=agent_recap,
+                    outcome=raw_objective
                 )
-                best_candidate = gepa_results.best_candidate
-                best_score = gepa_results.val_aggregate_scores[gepa_results.best_idx]
-            else:
-                # Optimization from existing fragment with MERGE
-                best_candidate = seed
-                best_score = 100
+                # This judgement supposes the problem is in the evaluator's interpretation
+                # judge_new_messages, feedback = judge_agent.judge_evaluation(
+                #     premise=objective,
+                #     proposal=agent_recap
+                # )
+                self.token_count += count_tokens(judge_new_messages)
+                # 1.1. Stabilize JSON feedback from LLM
+                # stable_feedback = stabilize_json(
+                #     unstable_string = feedback,
+                #     expected_keys = ["fix"]
+                # )
+                # score = float(stable_feedback["score"])
+                # if self.debug:
+                #     log_response(f"[JUDGE] - {stable_feedback["critique"]}")
+                # else:
+                #     log_response(f"[JUDGE] - {stable_feedback["critique"][:50]}...(more)")
+                # log_response(f"[JUDGE] - {score}/100.0")
 
-            # 2. Merge SEED and OPTIMIZED_SEED to mitigate information loss
-            progress_bar.title(titles["merger"])
-            merger_agent = AgentWrapper(name="MERGER", debug=self.debug)
-            merger_new_messages, merger = merger_agent.merge(current=seed, inbound=best_candidate)
-            self.token_count += count_tokens(merger_new_messages)
-            return merger, best_score
+                # # # 2 (alt). Human is the judge in the loop (HITL) - nudges tool call chains during learning
+                # with self.progress_bar.pause():
+                #     hitl = input("(Press Enter to confirm judgment, or write something) > ")
+                #     stable_feedback["critique"] = hitl
+                #     if hitl != "\n":
+                #         score = float(input("Override score (0-100) > "))
+
+                # 3. Return score and ASI (feedback)
+                score = float(feedback["score"])
+                if score > self.best_score:
+                    self.best_score = score
+                    self.progress_bar(score/100.0)       # Update progress bar
+                self.progress_bar.title(TITLES["reflection"])
+                return score, {
+                    "scores": {
+                        "score": score
+                    },
+                    # "original_objective": objective,                            # remind reflection what the objective is
+                    "objective": f"Refine current AI Agent instructions to solve the class of problems incorporating the following information: {objective}",
+                    "fix_this_in_instructions": feedback["fix"],    # nudge reflection with judge critique
+                    # "remark": "When fixing instructions, do not lose previous information. Merge instead of replace."
+                }
+            except Exception as e:
+                # In case of exceptions (broken JSONs, unreachable APIs, ...) fallback to a low score
+                log_error(f"CRITICAL ERROR - GEPA EVALUATE FAILED - {e}")
+                return 0.0, {
+                    "scores": {
+                        "score": 0.0
+                    },
+                    "artifact": candidate,
+                    "fix_this_in_instructions": f"Provided JSON is malformed. Hint to fix: {e}"
+                }
+
+        # 1. Optimize SEED to incorporate OBJECTIVE
+        # if seed is None:
+        # Optimization from scratch with GEPA
+        gepa_results = self.opinionated_optimize_anything(
+            reflection=propose_configuration,
+            evaluator=evaluate_configuration,
+            objective=f"Refine current AI Agent instructions to solve the class of problems incorporating the following information: {objective}",
+            seed_candidate=seed,       # If seed is 100% good then the objective is known in memory and GEPA is mostly skipped
+        )
+        best_candidate = gepa_results.best_candidate
+        best_score = gepa_results.val_aggregate_scores[gepa_results.best_idx]
+        # else:
+        #     # Optimization from existing fragment with MERGE
+        #     best_candidate = seed
+        #     best_score = 100
+
+        # 2. Merge SEED and OPTIMIZED_SEED to mitigate information loss
+        self.progress_bar.title(TITLES["merger"])
+        merger_agent = AgentWrapper(name="MERGER", debug=self.debug)
+        merger_new_messages, merger = merger_agent.merge(current=seed, inbound=best_candidate)
+        self.token_count += count_tokens(merger_new_messages)
+        return merger, best_score
 
     def opinionated_optimize_anything(
         self,
@@ -303,7 +288,7 @@ class GepaWrapper:
                 reflection=ReflectionConfig(
                     reflection_lm=self.model_string,
                     reflection_minibatch_size=1,            # Reduce from default 3 to lower memory usage
-                    perfect_score=100.0,                     # Empirically, when judge >90 there are often no fixes
+                    perfect_score=90.0,                     # Empirically, when judge >90 there are often no fixes
                     skip_perfect_score=True,                # Skip unnecessary evaluations
                     custom_candidate_proposer=reflection    # Custom reflection function
                 ),

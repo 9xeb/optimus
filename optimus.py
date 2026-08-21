@@ -3,11 +3,12 @@ import os
 import asyncio
 import json
 
+from alive_progress import alive_bar
 from pydantic_ai.models.function import _estimate_usage
 
 from src.gepa import GepaWrapper
 from src.agent import AgentWrapper
-from src.utils import stabilize_json, extract_execution_path
+from src.utils import TITLES, stabilize_json, extract_execution_path
 from src.log import log_internal_event, log_error, log_response
 
 class Optimus(GepaWrapper):
@@ -20,8 +21,8 @@ class Optimus(GepaWrapper):
         - deploy agents with prompts
     """
 
-    def __init__(self, debug: bool = False):
-        super().__init__(debug=debug)
+    def __init__(self, progress_bar, debug: bool = False):
+        super().__init__(progress_bar=progress_bar, debug=debug)
         self.fragments_dir = os.environ["HOME"]+'/'+'.optimus/prompts'
         self.token_count = 0
 
@@ -99,6 +100,7 @@ class Optimus(GepaWrapper):
             a string with the response
         """
         # 1. Run an agent with instructions and objective
+        self.progress_bar.title(TITLES["agent"])
         agent = AgentWrapper(name="AGENT", enable_mcp_toolsets=True)
         new_messages, response = agent.act(
             system_prompt=instructions,
@@ -167,7 +169,7 @@ class Optimus(GepaWrapper):
 
         # 1. Retrieve list of memory fragments
         fragments_preview = self.list_fragments()
-        log_internal_event(f"[OPTIMUS] fragments preview: {[fragment["name"] for fragment in fragments_preview]}")
+        log_internal_event(f"[OPTIMUS] Memory Fragments: {[fragment["name"] for fragment in fragments_preview]}")
 
         # 2. Pick a suitable fragment or start from scratch with a new one
         agent = AgentWrapper(name="MEMORY")
@@ -200,7 +202,7 @@ class Optimus(GepaWrapper):
         )
 
         # 4. Retrieve fragment from file or fallback to empty fragment
-        log_internal_event(f"[OPTIMUS] Choosing fragment {stable_feedback["name"]} - {stable_feedback["explanation"]}")
+        log_internal_event(f"[OPTIMUS] Proposing fragment {stable_feedback["name"]} - {stable_feedback["explanation"]}")
         try:
             with open(self.fragments_dir+'/'+stable_feedback["name"], 'r', encoding="utf-8") as f:
                 fragment = f.read()
@@ -224,28 +226,30 @@ class Optimus(GepaWrapper):
                 ]
         return fragments_preview
 
-    def hitl(self, history: list, response: str) -> str:
+    def hitl(self, prompt: str, history: list, response: str) -> str:
         """
         Human in the loop implementation.
         It works by expecting suggestions by human to fix execution path.
         If no suggestion is provided (i.e. human just pressed ENTER), the check is passed
 
         Args:
+            prompt: a short text to present to the human
             history: the latest agent message history
             response: a string containing the response
         """
 
         # Prepare execution path recap
         if len(history) > 0:
-            recap_agent = AgentWrapper(name="AGENT")
-            _, response = recap_agent.recap(history=history)
+            recap_agent = AgentWrapper(name="RECAP")
+            new_messages, response = recap_agent.recap(history=history)
         #     print("########## EXECUTION PATH ###############")
-        #     print(json.dumps(extract_execution_path(new_messages), indent=4))
+            # print(json.dumps(extract_execution_path(new_messages), indent=4))
         # print("########## RESPONSE #####################")
         # print(response)
         # print("#########################################")
-
-        return input("> ")
+        with self.progress_bar.pause():
+            human_in_the_loop = input(f"{prompt} > ")
+        return human_in_the_loop
 
 parser = argparse.ArgumentParser(
     prog="optimus",
@@ -262,41 +266,52 @@ parser = argparse.ArgumentParser(
 # parser.add_argument('-s', '--scope', help='scope to call', required=True)
 args = parser.parse_args()
 
-optimus = Optimus()
-# if args.learn:
-# Main loop in optimus mode
-chat_agent = AgentWrapper(name="CHAT", enable_mcp_toolsets=True, simulated=True)
+with alive_bar(
+    total=100,
+    dual_line=True,
+    manual=True,
+    title_length=max([len(TITLES[title]) for title in TITLES])
+) as progress_bar:
+    optimus = Optimus(progress_bar=progress_bar)
+    # chat_agent = AgentWrapper(name="CHAT", enable_mcp_toolsets=True, simulated=True)
+    # OPTIMUS loop
+    # VARIANT: after hitl(), apply()+binary_hitl() to check if current fragment is enough to predict outcome, else learn()
+    while True:
+        query = optimus.hitl(prompt="Give Optimus a Task", history=[], response="")   # user provides a task
+        fragment_name, fragment = optimus.find_fragment(objective=query)
+
+        # SHORT PATH: Can infer without learning?
+        if fragment is not None:
+            new_messages, response = optimus.apply(instructions=fragment, objective=query)
+            remark = optimus.hitl(prompt="Tell Optimus how to do better (Empty ENTER if satisfied)", history=new_messages, response=response)
+        else:
+            remark = " "    # whitespace to trigger LONG PATH when new fragment is requested
+        
+        # If SHORT PATH triggered a non-empty remark, LONG PATH is followed
+        while len(query) > 0 and len(remark) > 0:   # LONG PATH: Must learn fragment
+                fragment = optimus.learn(instructions=fragment, objective=query+remark)
+                new_messages, response = optimus.apply(instructions=fragment, objective=query+remark)
+                remark = optimus.hitl(prompt="Tell Optimus how to do better (Empty ENTER if satisfied)", history=new_messages, response=response)
+
+        # FINAL STEP: memorize new fragment
+        optimus.memorize(fragment_name=fragment_name, fragment=fragment)
 
 
-# OPTIMUS loop
-while True:
-    # user_input = input("> ").lstrip()
+# ORIGINAL, SIMPLIFIED VERSION
+# while True:
+#     # user_input = input("> ").lstrip()
 
-    # 0. find memory fragment
-    # 1. IF no memory fragment, learn(), ELSE apply()
-    # 2. AFTER learn() ALWAYS apply()
-    # 3. AFTER bad apply() ALWAYS learn()
-    # 4. AFTER good apply() ALWAYS memorize()
-    # 5. AFTER memorize() ALWAYS back to sleep
-    human_in_the_loop = optimus.hitl(history=[], response="THIS IS OPTIMUS. I AM AWAKE.")
-    fragment_name, fragment = optimus.find_fragment(human_in_the_loop)
-    while fragment is None or len(human_in_the_loop) > 0:
-        fragment = optimus.learn(instructions=fragment, objective=human_in_the_loop)
-        new_messages, response = optimus.apply(instructions=fragment, objective=human_in_the_loop)
-        human_in_the_loop = optimus.hitl(history=new_messages, response=response)
-    optimus.memorize(fragment_name=fragment_name, fragment=fragment)
-
-    # if user_input.startswith("/test "):
-    #     user_input = user_input.removeprefix("/test ")
-    #     optimus.apply(user_input)
-    # else:
-    # # if user_input.startswith("/optimus "):
-    # #     user_input = user_input.removeprefix("/optimus ")
-    # # 1. Learn = nudge memory fragments and grab the latest best
-    #     best_memory, best_score = optimus.learn(objective=user_input)
-    #     print("#########################################")
-    #     print(best_memory)
-    #     print("#########################################")
-    #     print(f"Tokens spent on optimizations: {optimus.token_count}")
-    #     print(f"Best score: {best_score}/100.0")
-
+#     # 0. find memory fragment
+#     # 1. IF no memory fragment, learn(), ELSE apply()
+#     # 2. AFTER learn() ALWAYS apply()
+#     # 3. AFTER bad apply() ALWAYS learn()
+#     # 4. AFTER good apply() ALWAYS memorize()
+#     # 5. AFTER memorize() ALWAYS back to sleep
+#     # VARIANT: after hitl(), apply()+binary_hitl() to check if current fragment is enough to predict outcome, else learn()
+#     human_in_the_loop = optimus.hitl(history=[], response="")
+#     fragment_name, fragment = optimus.find_fragment(human_in_the_loop)
+#     while fragment is None or len(human_in_the_loop) > 0:
+#         fragment = optimus.learn(instructions=fragment, objective=human_in_the_loop)
+#         new_messages, response = optimus.apply(instructions=fragment, objective=human_in_the_loop)
+#         human_in_the_loop = optimus.hitl(history=new_messages, response=response)
+#     optimus.memorize(fragment_name=fragment_name, fragment=fragment)

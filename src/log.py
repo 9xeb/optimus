@@ -40,7 +40,8 @@ def log(message, level=logging.DEBUG, color=GREY):
 
 def log_tool_request(command):
     log(
-        message="%s - CALLS TOOL - " % (command),
+        # message="%s - CALLS TOOL - " % (command),
+        message="TOOL CALL - %s" % (command),
         level=INFO,
         color=YELLOW
     )
@@ -109,6 +110,7 @@ def log_part(prefix, part):
     elif part.part_kind == "tool-call":
         log_tool_request(f"{prefix} - {json.dumps({"tool_name": part.tool_name, "args": part.args})}")
     elif part.part_kind == "tool-return":
-        log_tool_response(f"{prefix} - {json.dumps({"tool_name": part.tool_name, "result": part.content})}")
+        # log_tool_response(f"{prefix} - {json.dumps({"tool_name": part.tool_name, "result": part.content})}")
+        log_tool_response(f"{prefix} - {part})")
     elif part.part_kind == "text":
         log_response(f"{prefix} - {part.content.encode("unicode_escape").decode("utf-8")}")

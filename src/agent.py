@@ -15,8 +15,8 @@ from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.mcp import load_mcp_servers
 
-from src.utils import initialize_openai_client, stabilize_json
-from src.log import log_tool_request, log_error, log_internal_event, log_request, log_part, log_tool_response, color_print
+from src.utils import initialize_openai_client, stabilize_json, extract_execution_path
+from src.log import log_tool_request, log_error, log_internal_event, log_request, log_part, log_tool_response, color_print, GREEN, CYAN, GREY, YELLOW, MAGENTA
 
 @dataclass
 class AgentDeps:
@@ -75,11 +75,11 @@ async def ensure_tool_approval(
         user_approved = False
     
     if user_approved:
-        log_tool_request(f"{ctx.deps.log_prefix} - TOOL CALL - {call.tool_name}({args})")
+        log_tool_request(f"{ctx.deps.log_prefix} - {call.tool_name}({args})")
     #     log_internal_event(f"{ctx.deps.log_prefix} - TOOL APPROVED - {call.tool_name}({args})")
     if not user_approved:
         log_error(f"{ctx.deps.log_prefix} - TOOL REFUSED - {call.tool_name}({args})")
-        # Skip execution and return a custom message  
+        # Skip execution and return a custom message
         raise SkipToolExecution(result=f"Tool {call.tool_name} was not approved")
     return args
 
@@ -96,21 +96,36 @@ async def log_tool_result(
     Simple logging of tool output previews after they are executed. 
     """
     try:
-        # Your logging logic here
-        # if ctx.deps.verbose:
-        print_output_limit = 200
-        # agent_output_limit = 5000
-        # truncated_result = f"{result[:agent_output_limit+1]} {"[... truncated due to exceeding output size limits. Try filtering or grepping.]" if len(result) > agent_output_limit else ""}"
-        if result is not None and len(result) > print_output_limit:
-            log_tool_response(f'{ctx.deps.log_prefix}{call.tool_name}\n{result[:print_output_limit]}[... truncated]')
-        else:
-            log_tool_response(f"{ctx.deps.log_prefix}{call.tool_name} - {result}")
+        if ctx.deps.verbose:
+            # Your logging logic here
+            print_output_limit = 200
+            if result is not None and len(result) > print_output_limit:
+                log_tool_response(f'{ctx.deps.log_prefix}{call.tool_name}\n{result[:print_output_limit]}[... truncated]')
+            else:
+                log_tool_response(f"{ctx.deps.log_prefix}{call.tool_name} - {result}")
     except Exception as e:
-        # Don't let exceptions propagate - they cause retries
+        # Don't let exceptions propagate - they cause silent retries
         log_error(f"{ctx.deps.log_prefix} - after_tool_execute hook error: {e}")
-    # agent_output_limit = 5000
-    # truncated_result = f"{result[:agent_output_limit+1]} {"[... truncated due to exceeding output size limits. Try filtering or grepping.]" if len(result) > agent_output_limit else ""}"
     return result
+
+@hooks.on.tool_execute_error
+async def convert_upstream_errors(
+    ctx: RunContext[None],
+    *,
+    call: ToolCallPart,
+    tool_def: ToolDefinition,
+    args: dict[str, Any],
+    error: Exception,
+) -> Any:
+    log_error(f"{ctx.deps.log_prefix}{call.tool_name} - {error}")
+    # if isinstance(error, UpstreamError):
+    #     if error.status_code >= 500 or error.status_code == 429:
+    #         # Transient: the same call might succeed, so ask the model to try again.
+    #         raise ModelRetry(f'Upstream returned {error.status_code}, please try again.')
+    #     # Definitive (e.g. 404, 403): retrying won't help — report it so the model can adapt.
+    #     raise ToolFailed(f'Upstream returned {error.status_code}: {error}')
+    # raise error  # unrelated errors still abort the run
+
 
 # Model request logging
 @hooks.on.before_model_request
@@ -196,7 +211,8 @@ class AgentWrapper:
         )
         self.history = []       # simple list of messages used in stateful conversation
 
-        # Initialie MCP toolsets (with disabled approval for now)
+
+        # Initialize MCP toolsets (with disabled approval for now)
         self.mcp_path = os.environ["HOME"]+'/'+".optimus/mcp.json"
         if enable_mcp_toolsets and os.path.exists(self.mcp_path):
             self.mcp_toolsets = [
@@ -207,6 +223,16 @@ class AgentWrapper:
             self.mcp_toolsets = []
             if enable_mcp_toolsets:
                 log_error(f"Empty MCP toolset: {self.mcp_path}")
+
+        self.COLOR_MAP = {
+            "JUDGE": MAGENTA,
+            # "EVALUATOR": GREEN,
+            "REFLECTION": GREEN,
+            "MERGER": CYAN,
+            "AGENT": YELLOW,
+            "RECAP": GREEN
+        }
+
 
         # self.tool_count = [
         #     toolset.get_tools()
@@ -245,7 +271,7 @@ class AgentWrapper:
 
         agent = Agent(
             model=self.client,
-            system_prompt=task,
+            system_prompt=task if task is not None else "",
             tools=tools,
             toolsets=self.mcp_toolsets,     # Additional tools provided by mcp.json
             capabilities=[
@@ -267,20 +293,14 @@ class AgentWrapper:
                 usage_limits=UsageLimits(tool_calls_limit=20)
             ) as result:
                 if stream:
-                    from src.log import GREEN, CYAN, GREY, MAGENTA
-                    color_map = {
-                        "JUDGE": MAGENTA,
-                        "EVALUATOR": GREEN,
-                        "REFLECTION": GREEN,
-                        "MERGER": CYAN,
-                        "AGENT": GREEN,
-                    }
                     # Stream output tokens one by one
+                    color_print(f"################## {self.deps.log_prefix} #######################", color=self.COLOR_MAP[self.deps.log_prefix])
                     async for text in result.stream_text(delta=True):
-                        color_print(text, color=color_map[self.deps.log_prefix])
-                        # print(text)
+                        color_print(f"{text}", color=self.COLOR_MAP[self.deps.log_prefix])
+                    color_print(f"#########################################", color=self.COLOR_MAP[self.deps.log_prefix])
                 # Collect results
                 output = await result.get_output()
+                # log_error(f"{extract_execution_path(result.new_messages())}")
                 return result.new_messages(), output
         except ModelHTTPError as e:
             # Fall back to empty response
@@ -377,16 +397,19 @@ class AgentWrapper:
         Args:
             prompt: string containing instructions for an AI Agent
         """
-        return asyncio.run(self.async_step(
+        color_print(f"################## {self.deps.log_prefix} #######################", color=self.COLOR_MAP[self.deps.log_prefix])
+        new_messages, response = asyncio.run(self.async_step(
             # task="Simulate an execution path with a list of tool calls to solve the user's problem.",
             # task="Execute the INSTRUCTIONS. Report what did not work and why.",
             task=system_prompt,
             response_format="Your system prompt is the ONLY source of truth for providing answers and performing actions.",
             # response_format="OUTPUT FORMAT\nBrief bullet point list of tool calls that failed despite the INSTRUCTIONS.",
             user_prompt=prompt,
-            # stream=True,
+            stream=True,
             # tools=[],     # these are read by AgentWrapper class from ~/.optimus/mcp.json
         ))
+        color_print(f"#########################################", color=self.COLOR_MAP[self.deps.log_prefix])
+        return new_messages, response
 
     def recap(self, history):
         """
@@ -417,7 +440,7 @@ class AgentWrapper:
         return asyncio.run(self.async_step(
             task="""
             # YOUR ROLE
-            You are the Judge. 
+            You are the Judge.
             Rate how well the PROPOSAL respects the PREMISE. A valid PROPOSAL must consider the PREMISE.
             """,
             response_format="""
@@ -460,8 +483,9 @@ class AgentWrapper:
             task="""
             # YOUR ROLE
             You are the JUDGE.
-            Rate how well an AI Agent with the INSTRUCTIONS would be able to predict the OUTCOME. Valid INSTRUCTIONS account for the OUTCOME.
+            Rate how well AI Agent INSTRUCTIONS achieve the OUTCOME. Valid INSTRUCTIONS account for the OUTCOME.
             """,
+            # Rate how well an AI Agent with the INSTRUCTIONS would be able to predicct the OUTCOME. Valid INSTRUCTIONS account for the OUTCOME.
             response_format="""
             # YOUR OUTPUT FORMAT AS JUDGE
             Output format in JSON:
@@ -535,7 +559,7 @@ class AgentWrapper:
             task="""
             # YOUR ROLE
             You are the Information Merger.
-            Given a CURRENT text and an INBOUND text, create a new text that incorporates information from INBOUND inside CURRENT. INBOUND always wins over CURRENT when conflicts happen.
+            Given a CURRENT text and an INBOUND text, create a new text that incorporates information from INBOUND inside CURRENT. In case of contradictions, INBOUND always wins over CURRENT.
             """,
             response_format="",
             user_prompt=f"""
