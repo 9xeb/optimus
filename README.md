@@ -9,7 +9,7 @@ Or refine/pivot existing instructions:
 ![Refine existing prompts](docs/steer.gif) -->
 
 
-Powered by LLMs, [GEPA][gepa], [Pydantic AI][pydanticai]. Optimize those prompts with science and automation.
+Powered by LLMs, [GEPA][gepa], [Pydantic AI][pydanticai]. Optimize those agents with science and automation.
 
 ## Quickstart
 Install:
@@ -126,19 +126,16 @@ Remove Kubernetes and add Nomad
 ``` -->
 
 ### Known errors
-`unhandled errors in a TaskGroup (1 sub-exception)` -> sandbox is not running
+`unhandled errors in a TaskGroup (1 sub-exception)` -> sandbox is not running or MCP server is not working.
 
-[gepa]: https://gepa-ai.github.io/gepa/blog/2026/02/18/introducing-optimize-anything/
-[pydanticai]: https://github.com/pydantic/pydantic-ai
-
-## TODO
+<!-- ## TODO
 Add tk/s count and total token count
 
 Add max context size during evaluation
 
 Conversations become prototypes. You can scroll them, steer them. Everywhere is an optimus loop.
 
-Add more scores (turns taken, total tokens, other metrics) to optimize
+Add more scores (turns taken, total tokens, other metrics) to optimize -->
 
 <!-- ## TESTS
 We have a k8s cluster with three namespaces: 'backend', 'frontend' and 'database'. We are currently struggling with frequent database crashes probably due to load.
