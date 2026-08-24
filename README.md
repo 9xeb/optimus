@@ -3,10 +3,10 @@ Optimus accelerates continuous, evidence-driven design of LLM instructions to ac
 
 Give Optimus a goal and it will explore and test different prompts to achieve it, then choose the prompt that performed best and ask you to approve of the outcomes or suggest fixes.
 
-Start from scratch:
+<!-- Start from scratch:
 ![Start from scratch](docs/scratch.gif)
 Or refine/pivot existing instructions:
-![Refine existing prompts](docs/steer.gif)
+![Refine existing prompts](docs/steer.gif) -->
 
 
 Powered by LLMs, [GEPA][gepa], [Pydantic AI][pydanticai]. Optimize those prompts with science and automation.
@@ -25,14 +25,14 @@ export OPENAI_API_BASE=http://127.0.0.1:8080/v1
 export OPENAI_API_KEY=1234
 export OPENAI_API_MODEL=openai/my/local/model
 ```
-Pure text optimization (no MCP):
+<!-- Pure text optimization (no MCP):
 ```bash
 python3 optimus.py
 # ... > give objective
 # ... optimus works ...
 # ... > approve or suggest fixes
-```
-For agentic operations, prepare an `~/.optimus/mcp.json` file and:
+``` -->
+Prepare an `~/.optimus/mcp.json` file and:
 ```bash
 # If ~/.optimus/mcp.json exists, optimus will use the MCP tools
 python3 optimus.py
