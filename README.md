@@ -1,4 +1,4 @@
-# Optimus - The science of prompt engineering
+# Optimus - The science of Agentic Engineering
 Optimus accelerates continuous, evidence-driven design of LLM instructions to achieve specific goals. For agentic operations, Optimus can be configured to experiment on your test environment via MCP servers. Humans retain ownership of the goals and approve outcomes before the prompts that caused them are memorized for future use.
 
 Give Optimus a goal and it will explore and test different prompts to achieve it, then choose the prompt that performed best and ask you to approve of the outcomes or suggest fixes.
@@ -39,7 +39,7 @@ python3 optimus.py
 # ... Find pod problems in the kubernetes cluster
 # ...
 ```
-Stores currently discovered prompts in ~/.optimus/prompts as memory fragments.
+Stores currently discovered prompts in `~/.optimus/prompts` as memory fragments.
 
 <!-- echo "Formal email for job application as DevOps engineer." | python3 optimus.py
 # ... (you decide to steer the goal)
