@@ -4,6 +4,9 @@ json-repair
 pydantic-ai-slim[openai]==1.86.0
 pydantic-ai-slim[mcp]==1.86.0
 
+dspy==3.3.1
+dspy[deno]==3.3.1   # for python sandboxes
+
 # Gepa and dependencies
 # litellm
 # botocore # so litellm stops complaining all the time
@@ -13,3 +16,5 @@ gepa
 pytest
 
 alive-progress
+
+# fastapi-openai-compat==1.2.0
