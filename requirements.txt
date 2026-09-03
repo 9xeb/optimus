@@ -6,6 +6,7 @@ pydantic-ai-slim[mcp]==1.86.0
 
 dspy==3.3.1
 dspy[deno]==3.3.1   # for python sandboxes
+mlflow>=2.18.0
 
 # Gepa and dependencies
 # litellm

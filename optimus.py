@@ -3,7 +3,9 @@ import os
 import asyncio
 import json
 
+import litellm
 import dspy
+import mlflow
 from alive_progress import alive_bar
 from pydantic_ai.models.function import _estimate_usage
 
@@ -29,10 +31,16 @@ class Optimus(GepaWrapper):
         # self.message_queue = message_queue
         self.queue = asyncio.Queue()
         self.message_queue = asyncio.Queue()
+        self.memories = {}
 
         self.chat_agent = AgentWrapper(name="CHAT", message_queue=self.message_queue)
 
+        # Setup mlflow integration
+        mlflow.set_tracking_uri(os.environ["MLFLOW_API_BASE"])
+        mlflow.set_experiment("Optimus")
+        mlflow.autolog()
 
+        # Setup dspy LM
         self.lm = dspy.LM(
             os.environ["OPENAI_API_MODEL"],
             api_base=os.environ["OPENAI_API_BASE"],
@@ -41,7 +49,8 @@ class Optimus(GepaWrapper):
         )
         dspy.configure(lm=self.lm)      # set default provider locally, can override with dspy.context
 
-        self.memories = {}
+
+
     """
     Optimus optimizes agentic DSPy programs, starting from a set of primitives.
     Primitives: 
@@ -643,7 +652,7 @@ async def main():
         # optimus.route(),
         # optimus.chat(),
         # optimus.test(),
-        optimus.memory(),
+        optimus.memory_management(),
         # optimus.stream()
     )
 
