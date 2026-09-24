@@ -1,6 +1,7 @@
 import os
 import json
 import json5
+import dspy
 from json_repair import repair_json
 
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -19,6 +20,44 @@ TITLES = {
     "compactor": "[COMPACTOR] - Compacting instructions...",
     "agent": "[AGENT] - Running instructions..."
 }
+
+async def stream_dspy_program(module: dspy.Module, **kwargs):
+    """
+    Output streaming util for DSPy programs.
+    Args:
+        module: DSPy module to run
+        **kwargs: list of kwargs corresponding to the signature inputs
+    
+    Return:
+        a Prediction object containing the signature outputs
+    """
+    # Wrap module around streamer
+    streamer = dspy.streamify(
+        program=module,
+        is_async_program=True,
+        # stream_listeners=[
+        #     dspy.streaming.StreamListener(signature_field_name="reasoning")
+        #     ]
+        stream_listeners=[    # recursively extract all output field names regardless of the module type
+            dspy.streaming.StreamListener(signature_field_name=output_field_key)
+            for _, (name, predictor) in enumerate(module.named_predictors())
+            for output_field_key in predictor.signature.output_fields.keys()
+        ]
+    )
+    # Run program=module+arguments and stream output fields
+    try:
+        prediction = ""
+        async for chunk in streamer(**kwargs):          # pass signature values to module inside streamer
+            if isinstance(chunk, dspy.streaming.StreamResponse):
+                # when multi-output, chunk.signature_field_name is the name of the output that the chunk belongs to
+                print(f"{chunk.chunk}", end="", flush=True)
+                # await self.message_queue.put(chunk.chunk)
+            elif isinstance(chunk, dspy.Prediction):      # the last chunk with final response is a Prediction
+                prediction = chunk
+    except* AttributeError as e:
+        # except* unwraps any exceptions raised under BaseExceptionGroup, which happens with dspy.RLM
+        pass    # skip current bug where some dspy.RLM predictors have broken chunks
+    return prediction
 
 def count_tokens(new_messages):
     """

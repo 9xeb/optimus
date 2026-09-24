@@ -21,9 +21,11 @@ python3 -m pip install -r requirements.txt
 ```
 Point to your (local) LLM:
 ```bash
-export OPENAI_API_BASE=http://127.0.0.1:8080/v1
+export OPENAI_API_BASE=http://127.0.0.1:8081/v1
 export OPENAI_API_KEY=1234
 export OPENAI_API_MODEL=openai/my/local/model
+export MLFLOW_API_BASE=http://127.0.0.1:5000
+export MCP_GATEWAY=http://127.0.0.1:8080/mcp
 ```
 <!-- Pure text optimization (no MCP):
 ```bash
