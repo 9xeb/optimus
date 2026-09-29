@@ -3,13 +3,14 @@ import json
 import json5
 import dspy
 from json_repair import repair_json
+from anytree import Node, RenderTree
 
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.models.function import _estimate_usage
 
-from src.log import log_internal_event
+from src.log import log_internal_event, log_error
 
 TITLES = {
     "optimus": "[OPTIMUS] - Preparing experiments...",
@@ -38,9 +39,19 @@ async def stream_dspy_program(module: dspy.Module, **kwargs):
         # stream_listeners=[
         #     dspy.streaming.StreamListener(signature_field_name="reasoning")
         #     ]
-        stream_listeners=[    # recursively extract all output field names regardless of the module type
-            dspy.streaming.StreamListener(signature_field_name=output_field_key)
-            for _, (name, predictor) in enumerate(module.named_predictors())
+        # stream_listeners=[    # recursively extract all output field names regardless of the module type
+        #     dspy.streaming.StreamListener(signature_field_name=output_field_key)
+        #     for _, (name, predictor) in enumerate(module.named_predictors())
+        #     for output_field_key in predictor.signature.output_fields.keys()
+        # ]
+        stream_listeners=[
+            dspy.streaming.StreamListener(
+                signature_field_name=output_field_key,
+                predict=predictor,
+                predict_name=name,
+                allow_reuse=True,   # ReAct calls its predictor repeatedly
+            )
+            for name, predictor in module.named_predictors()
             for output_field_key in predictor.signature.output_fields.keys()
         ]
     )
@@ -58,6 +69,28 @@ async def stream_dspy_program(module: dspy.Module, **kwargs):
         # except* unwraps any exceptions raised under BaseExceptionGroup, which happens with dspy.RLM
         pass    # skip current bug where some dspy.RLM predictors have broken chunks
     return prediction
+
+def render_optimus_tree(root: Node) -> str:
+    """
+    Render and anytree tree starting from a root optimus node (a.k.a. contains a prediction key).
+
+    Args:
+        root: the anytree Node instance to start from
+    
+    Return:
+        a rendering of the tree
+    """
+    try:
+        print("################# RENDER ##############")
+        render = ""
+        for pre, _, node in RenderTree(root):
+            payload = {"task": node.name, "complete": node.prediction is not None}
+            print(f"{pre}{payload}")
+            render += f"{pre}{payload}\n"
+        print("#######################################")
+    except Exception as e:
+        log_error(f"{e}")
+    return render
 
 def count_tokens(new_messages):
     """
