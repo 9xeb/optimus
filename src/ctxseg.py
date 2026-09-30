@@ -27,18 +27,18 @@ class CtxSeg(dspy.Module):
         # self.bad_traces = []        # bad traces upon human review
 
         self.explore = dspy.ReAct(
-            signature="previously_completed_tasks, knowledge_base:list, task -> report_tweet",
+            signature="previously_completed_tasks, knowledge_base:list, task -> report",
             tools=[self.advance, self.branch, self.escalate]
         )
 
         self.exploit = dspy.ReAct(
-            signature="previously_completed_tasks, knowledge_base:list, task -> report_tweet",
+            signature="previously_completed_tasks, knowledge_base:list, task -> report",
             tools=[self.branch, self.escalate] + self.external_tools
         )
 
         # Setup execution tree and navigation
-        self.nodes = {"root": Node("root", prediction=None)}
-        self.cursor = self.nodes["root"].name
+        self.nodes = {}
+        self.cursor = "root"
         self.latest_render = None
 
         # TODO: MCP tool to python function wrapper with tool approval
@@ -49,6 +49,10 @@ class CtxSeg(dspy.Module):
         Expand on explorer-worker segmentation with knowledge_base
         """
         log_internal_event(f"Exploring: ({task})")
+        if len(self.nodes.items()) == 0:
+            self.nodes = {"root": Node(task, prediction=None)}
+
+        self.latest_render = render_optimus_tree(self.nodes["root"])
         exploration = self.explore(
             task=task,
             knowledge_base=self.qna,
@@ -57,13 +61,13 @@ class CtxSeg(dspy.Module):
         # self.unclassified_traces += [exploration.trajectory]
 
         # Store answer to human task in QnA dataset.
-        if self.cursor == "root":
-            self.qna += [dspy.Example(question=task, answer=exploration.report_tweet)]
-            log_internal_event(f"Stored answer to: {json.dumps([task], indent=4)} in dataset.")
+        # if self.cursor == "root":
+        self.qna += [dspy.Example(question=task, answer=exploration.report)]
+        log_internal_event(f"Stored answer to: {json.dumps([task], indent=4)} in dataset.")
 
         return exploration
         # return dspy.Prediction(
-        #     report=exploration.report_tweet
+        #     report=exploration.report
         # )
 
     async def aforward(self, task, **kwargs):
@@ -71,6 +75,10 @@ class CtxSeg(dspy.Module):
         Expand on explorer-worker segmentation with knowledge_base
         """
         log_internal_event(f"Exploring: ({task})")
+        if len(self.nodes.items()) == 0:
+            self.nodes = {"root": Node(task, prediction=None)}
+
+        self.latest_render = render_optimus_tree(self.nodes["root"])
         exploration = await self.explore.acall(
             task=task,
             knowledge_base=self.qna,
@@ -79,13 +87,13 @@ class CtxSeg(dspy.Module):
         # self.unclassified_traces += [exploration.trajectory]
 
         # Store answer to human task in QnA dataset.
-        if self.cursor == "root":
-            self.qna += [dspy.Example(question=task, answer=exploration.report_tweet)]
-            log_internal_event(f"Stored answer to: {json.dumps([task], indent=4)} in dataset.")
+        # if self.cursor == "root":
+        self.qna += [dspy.Example(question=task, answer=exploration.report)]
+        log_internal_event(f"Stored answer to: {json.dumps([task], indent=4)} in dataset.")
 
         return exploration
         # return dspy.Prediction(
-        #     report=exploration.report_tweet
+        #     report=exploration.report
         # )
 
     async def advance(self, prompt: str):
@@ -101,6 +109,7 @@ class CtxSeg(dspy.Module):
                 prediction=None
             )
         }
+        self.latest_render = render_optimus_tree(self.nodes["root"])
         exploitation = await stream_dspy_program(
             self.exploit,
             task=prompt,
@@ -110,9 +119,9 @@ class CtxSeg(dspy.Module):
         self.nodes[prompt].prediction = exploitation
         # self.unclassified_traces += [exploitation.trajectory]
 
-        self.latest_render = render_optimus_tree(self.nodes["root"])
+        # self.latest_render = render_optimus_tree(self.nodes["root"])
 
-        return exploitation.report_tweet  # this return is just for the agent branch that called it
+        return exploitation.report  # this return is just for the agent branch that called it
 
     async def branch(self, tasks: list[str]):
         """
@@ -145,10 +154,10 @@ class CtxSeg(dspy.Module):
                 # 4. Restore cursor while going back up the tree
                 self.cursor = self.nodes[task].parent.name
 
-                self.latest_render = render_optimus_tree(self.nodes["root"])
+                # self.latest_render = render_optimus_tree(self.nodes["root"])
 
             return [
-                {"task": task, "report": self.nodes[task].prediction.report_tweet}
+                {"task": task, "report": self.nodes[task].prediction.report}
                 for task in tasks
             ]
             # return [
@@ -160,7 +169,7 @@ class CtxSeg(dspy.Module):
             #             (await stream_dspy_program(
             #                 self.explore,
             #                 task=task,
-            #                 knowledge_base=self.qna)).report_tweet
+            #                 knowledge_base=self.qna)).report
             #     }
             #     for task in tasks
             # ]

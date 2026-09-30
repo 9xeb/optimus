@@ -5,7 +5,7 @@ import dspy
 import mlflow
 
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from src.utils import stream_dspy_program, require_approval
 from src.log import log_internal_event
@@ -44,7 +44,7 @@ class Optimus():
         """
         Consume a problem with CtxSeg+MCP
         """
-        async with streamablehttp_client(os.environ["MCP_GATEWAY"]) as (read, write, _):
+        async with streamable_http_client(os.environ["MCP_GATEWAY"]) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = await session.list_tools()

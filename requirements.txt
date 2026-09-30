@@ -1,23 +1,27 @@
-json5
-json-repair
+# json5
+# json-repair
 
-pydantic-ai-slim[openai]==1.86.0
-pydantic-ai-slim[mcp]==1.86.0
+# pydantic-ai-slim[openai]==1.86.0
+# pydantic-ai-slim[mcp]==1.86.0
 
-mcp
+mcp==2.2.0
 dspy==3.3.1
 dspy[deno]==3.3.1   # for python sandboxes
-mlflow>=2.18.0
+mlflow==2.18.0
 
 # Gepa and dependencies
 # botocore # so litellm stops complaining all the time
-litellm
-gepa
+litellm==1.103.1
+gepa==0.1.4
+
+# Transparent context optimization
+headroom==0.2.7
 
 # Tree rendering
-anytree
+anytree==2.13.0
 
-pytest
+# Unit testing
+pytest==9.1.1
 
 # alive-progress
 # fastapi-openai-compat==1.2.0

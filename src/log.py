@@ -1,7 +1,6 @@
 import logging
 import json
 import sys
-from pydantic_ai import ModelMessage
 
 DEBUG = logging.DEBUG
 INFO = logging.INFO
