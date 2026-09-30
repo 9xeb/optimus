@@ -1,7 +1,6 @@
-import asyncio
 import json
 import dspy
-from anytree import Node, RenderTree
+from anytree import Node
 
 from src.log import log_internal_event, log_error
 from src.utils import stream_dspy_program, render_optimus_tree

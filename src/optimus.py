@@ -1,17 +1,13 @@
 import asyncio
 import os
-import json
-import functools
 
-import litellm
 import dspy
 import mlflow
 
-from dspy.utils.callback import BaseCallback
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from src.utils import stream_dspy_program
+from src.utils import stream_dspy_program, require_approval
 from src.log import log_internal_event
 
 from src.ctxseg import CtxSeg
@@ -21,7 +17,7 @@ class Optimus():
     Adds an interface to CtxSeg module.
     Support env vars for connecting to OpenAI compatible APIs, Mlflow and a single MCP server.
     """
-    def __init__(self):
+    def __init__(self, approval: bool):
         lm = dspy.LM(
             os.environ["OPENAI_API_MODEL"],
             api_base=os.environ["OPENAI_API_BASE"],
@@ -42,6 +38,8 @@ class Optimus():
         # self.tasks_queue = asyncio.Queue()      # branches and leaves
         # self.questions = asyncio.Queue()
 
+        self.approval = approval
+
     async def solve(self, task):
         """
         Consume a problem with CtxSeg+MCP
@@ -51,10 +49,26 @@ class Optimus():
                 await session.initialize()
                 tools = await session.list_tools()
 
-                mcp_tools = [dspy.Tool.from_mcp_tool(session, tool) for tool in tools.tools]
+                mcp_tools = [
+                    dspy.Tool.from_mcp_tool(session, tool)
+                    for tool in tools.tools
+                ]
+
+                if self.approval:
+                    mcp_tools = [
+                        dspy.Tool(
+                            require_approval(tool.func, tool.name),
+                            name=tool.name,
+                            desc=tool.desc,
+                            args=tool.args,
+                            arg_types=tool.arg_types
+                        )
+                        for tool in mcp_tools
+                    ]
+
                 # Tools have .name, .desc that can be used for discovery
                 log_internal_event(f"MCP TOOLS: {[tool.name for tool in mcp_tools]}")
-                
+
                 agent = CtxSeg(tools=mcp_tools)
                 optimus_output = await stream_dspy_program(
                     agent,
@@ -62,7 +76,7 @@ class Optimus():
                 )
                 # print(f"Traces: {agent.unclassified_traces}")
                 # print(optimus_output.report)
-        return optimus_output.report_tweet
+        return optimus_output.report
 
     async def consume_tasks(self):
         """

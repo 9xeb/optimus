@@ -1,6 +1,5 @@
 import asyncio
 import argparse
-import asyncio
 
 from src.optimus import Optimus
 
@@ -13,6 +12,7 @@ parser = argparse.ArgumentParser(
 # parser.add_argument('-d', '--dir', help='Where to save the prompt files', required=False)
 # parser.add_argument('-c', '--criteria', help='criteria', action='append')
 # parser.add_argument('-l', '--learn', action='store_true', help='enable learn mode')
+parser.add_argument('-a', '--approval', action='store_true', help='Enable tool approval')
 args = parser.parse_args()
 
 # TODO: build a static binary for this cli
@@ -22,7 +22,7 @@ async def main():
     Connects Optimus with User Interface
     """
     while True:
-        optimus = Optimus()
+        optimus = Optimus(approval=args.approval)
         prompt = input("> ")
         print(await optimus.solve(prompt))
     # await asyncio.gather(
