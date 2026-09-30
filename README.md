@@ -49,7 +49,7 @@ Suppose your AI agent achieved the intended goal with no mistakes and no hiccups
 
 What if you could instead start from scratch, with minimal assumptions, and rely on a continuous, evidence-driven prompt search algorithm, that learned directly from you and the environment on which it is supposed to be deployed, with no additional structural overhead or rigid assumptions on what the the agentic architecture will look like? You would own the problems and help validate the outcomes, then you would let search and compute do its job automatically. Enter Optimus.
 
-At the heart of Optimus' problem solving engine lies a recursive DSPy module that run ReAct agents capable of branching themselves. Each branch is a self-contained, recursive [segmented context](https://arxiv.org/abs/2609.12839) that has the following properties:
+At the heart of Optimus' problem solving engine lies a recursive DSPy module that runs ReAct agents capable of branching themselves. Each branch is a self-contained, recursive [segmented context](https://arxiv.org/abs/2609.12839) that has the following properties:
 - it is a fully functional ReAct agent;
 - can `escalate` questions to a human when stuck;
 - can split a complex situation into multiple contexts via `branch`;
@@ -79,7 +79,7 @@ In the meantime, GEPA keeps an **evolutionary pool** of least criticized prompts
 This form of automated prompt engineering stops and comes back to the human when it either reaches a **plateau** in the optimization or it believes to have found a prompt that yielded a **perfect** execution path.
 
 ### The role of humans in agentic prompt engineering (to be implemented)
-Instead of validating every single output, humans write a set of rules for the machine to self-evaluate against. This is also called [Constitutional AI](https://arxiv.org/abs/2212.08073)
+Instead of validating every single output, humans write a set of rules for the machine to self-evaluate against. For example, see [Constitutional AI](https://arxiv.org/abs/2212.08073).
 
 ## Why it works
 Instead of manually chasing outcomes, Optimus focuses on applying a scientific method to explore the prompts that might generate those outcomes. Anything that the LLM can infer at runtime is left to be inferred at runtime.
@@ -91,8 +91,8 @@ Optimus replaces long conversations with machine accelerated prototyping. Humans
 
 Optimus differs from a typical conversational interface for a few reasons:
  - effort is shifted away from the user and towards the LLM.
- - conversational context size does not build up thanks to context segmentation. LLMs do not degrade due to context bloat.
- - prompts are tested and scored in your (repeatable, test) environment before you receive an actual response.
+ - conversational context size builds up more slowly thanks to context segmentation. LLMs degradation due to context bloat is mitigated.
+ <!-- - prompts are tested and scored in your (repeatable, test) environment before you receive an actual response. -->
 
 <!-- ### Known errors
 `unhandled errors in a TaskGroup (1 sub-exception)` -> sandbox is not running or MCP server is not working. -->
