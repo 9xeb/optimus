@@ -17,7 +17,7 @@ class Optimus():
     Adds an interface to CtxSeg module.
     Support env vars for connecting to OpenAI compatible APIs, Mlflow and a single MCP server.
     """
-    def __init__(self, approval: bool):
+    def __init__(self, approval: bool = False):
         lm = dspy.LM(
             os.environ["OPENAI_API_MODEL"],
             api_base=os.environ["OPENAI_API_BASE"],
