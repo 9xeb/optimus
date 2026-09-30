@@ -9,7 +9,7 @@ services:
       MCP_CONFIG: "/home/optimus/mcp_config.json"
     network_mode: "host"
   runner:
-    profiles: ["runner"]
+    # profiles: ["runner"]
     image: ghcr.io/ggml-org/llama.cpp:server-b10454
     command: --no-mmproj
     environment:
