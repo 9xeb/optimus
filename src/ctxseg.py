@@ -28,12 +28,12 @@ class CtxSeg(dspy.Module):
         # self.bad_traces = []        # bad traces upon human review
 
         self.explore = dspy.ReAct(
-            signature="previously_completed_tasks, knowledge_base:list, task -> report",
+            signature="previously_completed_tasks, knowledge_base:list, task -> report_tweet",
             tools=[self.advance, self.branch, self.escalate]
         )
 
         self.exploit = dspy.ReAct(
-            signature="previously_completed_tasks, knowledge_base:list, task -> report",
+            signature="previously_completed_tasks, knowledge_base:list, task -> report_tweet",
             tools=[self.branch, self.escalate] + self.external_tools
         )
 
@@ -42,8 +42,6 @@ class CtxSeg(dspy.Module):
         self.cursor = self.nodes["root"].name
         self.latest_render = None
 
-        # THIS: mlflow to check why more than 17k tokens running around
-        #               - one cause is AIO Sandbox verbose tools
         # TODO: MCP tool to python function wrapper with tool approval
         # TODO: tmux and replace self.exploit with an external call to opencode/codex
 
@@ -58,9 +56,15 @@ class CtxSeg(dspy.Module):
             previously_completed_tasks=self.latest_render
         )
         # self.unclassified_traces += [exploration.trajectory]
+
+        # Store answer to human task in QnA dataset.
+        if self.cursor == "root":
+            self.qna += [dspy.Example(question=task, answer=exploration.report_tweet)]
+            log_internal_event(f"Stored answer to: {json.dumps([task], indent=4)} in dataset.")
+
         return exploration
         # return dspy.Prediction(
-        #     report=exploration.report
+        #     report=exploration.report_tweet
         # )
 
     async def aforward(self, task, **kwargs):
@@ -74,16 +78,22 @@ class CtxSeg(dspy.Module):
             previously_completed_tasks=self.latest_render
         )
         # self.unclassified_traces += [exploration.trajectory]
+
+        # Store answer to human task in QnA dataset.
+        if self.cursor == "root":
+            self.qna += [dspy.Example(question=task, answer=exploration.report_tweet)]
+            log_internal_event(f"Stored answer to: {json.dumps([task], indent=4)} in dataset.")
+
         return exploration
         # return dspy.Prediction(
-        #     report=exploration.report
+        #     report=exploration.report_tweet
         # )
 
     async def advance(self, prompt: str):
         """
         Prompt a simple AI agent to perform a straightforward action for you.
         """
-        log_internal_event(f"Pushing: ({prompt})")
+        log_internal_event(f"Advancing: ({prompt})")
 
         self.nodes = self.nodes | {
             prompt: Node(
@@ -103,7 +113,7 @@ class CtxSeg(dspy.Module):
 
         self.latest_render = render_optimus_tree(self.nodes["root"])
 
-        return exploitation.report  # this return is just for the agent branch that called it
+        return exploitation.report_tweet  # this return is just for the agent branch that called it
 
     async def branch(self, tasks: list[str]):
         """
@@ -111,7 +121,7 @@ class CtxSeg(dspy.Module):
         """
         # Prompt a team of AI agents to perform one or more parallel actions for you.
         # Split a larger or more complex situation into multiple prompts to be delegated.
-        log_internal_event(f"Branching: ({tasks})")
+        log_internal_event(f"Branching: ({json.dumps(tasks, indent=4)})")
         try:
             for task in tasks:
                 # 1. Create new node and point the cursor at its name
@@ -139,7 +149,7 @@ class CtxSeg(dspy.Module):
                 self.latest_render = render_optimus_tree(self.nodes["root"])
 
             return [
-                {"task": task, "report": self.nodes[task].prediction.report}
+                {"task": task, "report": self.nodes[task].prediction.report_tweet}
                 for task in tasks
             ]
             # return [
@@ -151,7 +161,7 @@ class CtxSeg(dspy.Module):
             #             (await stream_dspy_program(
             #                 self.explore,
             #                 task=task,
-            #                 knowledge_base=self.qna)).report
+            #                 knowledge_base=self.qna)).report_tweet
             #     }
             #     for task in tasks
             # ]
@@ -173,6 +183,9 @@ class CtxSeg(dspy.Module):
         # TODO: Branch a chat with the user to get unstuck.
         # TODO: do not ask human if question is already known
         # TODO: implement recursive EPHEMERAL copy of parent node to answer the question (root node is human)
+        
+        # TODO: L1 with RLM when self.qna is not empty. So self.qna can grow forever and RLM can search it.
+
         print("#################### HUMAN REQUIRED #####################")
         answers = []
         for question in questions:

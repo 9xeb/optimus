@@ -4,18 +4,20 @@ json-repair
 pydantic-ai-slim[openai]==1.86.0
 pydantic-ai-slim[mcp]==1.86.0
 
+mcp
 dspy==3.3.1
 dspy[deno]==3.3.1   # for python sandboxes
 mlflow>=2.18.0
 
 # Gepa and dependencies
-# litellm
 # botocore # so litellm stops complaining all the time
 litellm
 gepa
 
+# Tree rendering
+anytree
+
 pytest
 
-alive-progress
-
+# alive-progress
 # fastapi-openai-compat==1.2.0

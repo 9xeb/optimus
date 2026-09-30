@@ -47,6 +47,6 @@ jobs:
         -e OPENAI_API_BASE=http://127.0.0.1:8080 \
         -e OPENAI_API_KEY=1234 \
         -e OPENAI_API_MODEL=openai/local \
-        -e MCP_CONFIG=/home/optimus/mcp_config.json \
+        -e MCP_GATEWAY=http://127.0.0.1:8081 \
         9xeb/optimus:test
 

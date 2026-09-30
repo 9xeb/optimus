@@ -1,5 +1,6 @@
 services:
-  optimus:
+  harness:
+    # profile: ["harness"]
     build: .
     environment:
       OPENAI_API_BASE: http://127.0.0.1:8080/v1
@@ -7,3 +8,83 @@ services:
       OPENAI_API_MODEL: openai/local
       MCP_CONFIG: "/home/optimus/mcp_config.json"
     network_mode: "host"
+  runner:
+    profiles: ["runner"]
+    image: ghcr.io/ggml-org/llama.cpp:server-b10454
+    command: --no-mmproj
+    environment:
+      # GGML_VK_DISABLE_F16: 1  # workaround to avoid gibberish output on Intel iGPUs (https://github.com/ggml-org/llama.cpp/issues/17106)
+      LLAMA_ARG_HOST: 0.0.0.0
+      LLAMA_ARG_HF_REPO: unsloth/gemma-4-E4B-it-qat-GGUF:UD-Q4_K_XL
+      LLAMA_ARG_BATCH: 512
+      LLAMA_ARG_THREADS: 4
+      # LLAMA_ARG_CACHE_TYPE_K: q8_0 
+      # LLAMA_ARG_CACHE_TYPE_v: q8_0
+      LLAMA_ARG_FLASH_ATTN: on
+      LLAMA_ARG_CTX_SIZE: 32768
+      LLAMA_ARG_SPEC_TYPE: draft-mtp
+      LLAMA_ARG_SPEC_DRAFT_N_MAX: 1
+      # LLAMA_ARG_CPU_MOE: on
+      # LLAMA_ARG_N_CPU_MOE: 18
+      LLAMA_ARG_REASONING: off  # on|off|auto
+    ports:
+      - 127.0.0.1:8080:8080
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    restart: unless-stopped
+    networks:
+      - optimus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3      # increase retries if first download of LLM is very slow
+  sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox
+    security_opt:
+      - seccomp:unconfined
+    network_mode: host
+    volumes:
+      - sandbox-data:/home/gem/workspace
+      - sandbox-kube:/home/gem/.kube
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # allows access to host's localhost via host.docker.internal
+    restart: "unless-stopped"
+    shm_size: "2gb"
+    environment:
+      SANDBOX_API_KEY: ${SANDBOX_API_KEY:-}
+      PROXY_SERVER: ${PROXY_SERVER:-}
+      WORKSPACE: ${WORKSPACE:-/home/gem/workspace}
+      TZ: ${TZ:-Europe/Berlin}
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.15.2-full
+    ports:  
+      - "5000:5000"  
+    volumes:  
+      - mlflow-data:/mlflow  
+    # environment:  
+    #   MLFLOW_BACKEND_STORE_URI: sqlite:////mlflow/mlflow.db  
+    #   MLFLOW_DEFAULT_ARTIFACT_ROOT: /mlflow/artifacts  
+    command: >  
+      mlflow server  
+      --backend-store-uri sqlite:////mlflow/mlflow.db  
+      --default-artifact-root /mlflow/artifacts  
+      --host 0.0.0.0
+    networks:
+      - optimus
+    healthcheck:  
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]  
+      interval: 10s  
+      timeout: 5s  
+      retries: 30  
+
+volumes:
+  hf-cache:
+  sandbox-data:
+  sandbox-kube:
+  mlflow-data:
+
+networks:
+  optimus:

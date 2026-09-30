@@ -1,6 +1,5 @@
-import argparse
-import os
 import asyncio
+import os
 import json
 import functools
 
@@ -17,22 +16,11 @@ from src.log import log_internal_event
 
 from src.ctxseg import CtxSeg
 
-parser = argparse.ArgumentParser(
-    prog="optimus",
-    description="Automatic optimization of text artifacts according to predefined criteria"
-)
-# run_mode = parser.add_mutually_exclusive_group(required=True)
-# run_mode.add_argument('-f', '--file', help="source file")
-# parser.add_argument('-d', '--dir', help='Where to save the prompt files', required=False)
-# parser.add_argument('-c', '--criteria', help='criteria', action='append')
-# parser.add_argument('-l', '--learn', action='store_true', help='enable learn mode')
-args = parser.parse_args()
-
-# MCP stuff
-
-# Setup dspy LM
-
 class Optimus():
+    """
+    Adds an interface to CtxSeg module.
+    Support env vars for connecting to OpenAI compatible APIs, Mlflow and a single MCP server.
+    """
     def __init__(self):
         lm = dspy.LM(
             os.environ["OPENAI_API_MODEL"],
@@ -43,10 +31,12 @@ class Optimus():
         # dspy.configure(lm=self.lm, callbacks=[LoggingCallback()])      # set default provider locally, can override with dspy.context
         dspy.configure(lm=lm)
         dspy.disable_litellm_logging()
+
         # Setup mlflow integration
-        # mlflow.set_tracking_uri(os.environ["MLFLOW_API_BASE"])
-        # mlflow.set_experiment("OptimusV2")
-        # mlflow.autolog()
+        if os.environ.get("MLFLOW_API_BASE"):
+            mlflow.set_tracking_uri(os.environ["MLFLOW_API_BASE"])
+            mlflow.set_experiment("Optimus")
+            mlflow.autolog()
 
         self.tasks = asyncio.Queue()
         # self.tasks_queue = asyncio.Queue()      # branches and leaves
@@ -72,7 +62,7 @@ class Optimus():
                 )
                 # print(f"Traces: {agent.unclassified_traces}")
                 # print(optimus_output.report)
-        return optimus_output.report
+        return optimus_output.report_tweet
 
     async def consume_tasks(self):
         """
@@ -83,18 +73,3 @@ class Optimus():
             if task is None:
                 return
             self.solve(task=task)
-
-async def main():
-    """
-    Connects Optimus with User Interface
-    """
-    while True:
-        optimus = Optimus()
-        prompt = input("> ")
-        print(await optimus.solve(prompt))
-    # await asyncio.gather(
-    #     optimus.consume_tasks()
-    # )
-
-asyncio.run(main())
-
