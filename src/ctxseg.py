@@ -27,18 +27,19 @@ class CtxSeg(dspy.Module):
         # self.bad_traces = []        # bad traces upon human review
 
         self.explore = dspy.ReAct(
-            signature="previously_completed_tasks, knowledge_base:list, task -> report",
+            signature="current_task -> report",
             tools=[self.advance, self.branch, self.escalate]
         )
 
         self.exploit = dspy.ReAct(
-            signature="previously_completed_tasks, knowledge_base:list, task -> report",
-            tools=[self.branch, self.escalate] + self.external_tools
+            signature="current_task -> report",
+            tools=[self.advance, self.branch, self.escalate] + self.external_tools
         )
 
         # Setup execution tree and navigation
-        self.nodes = {}
-        self.cursor = "root"
+        self.nodes = []
+        self.task_count = 0
+        self.cursor = 0
         self.latest_render = None
 
         # TODO: MCP tool to python function wrapper with tool approval
@@ -49,16 +50,21 @@ class CtxSeg(dspy.Module):
         Expand on explorer-worker segmentation with knowledge_base
         """
         log_internal_event(f"Exploring: ({task})")
-        if len(self.nodes.items()) == 0:
-            self.nodes = {"root": Node(task, prediction=None)}
+        if len(self.nodes) == 0:
+            self.nodes = [Node(task, prediction=None, id=self.cursor)]
 
-        self.latest_render = render_optimus_tree(self.nodes["root"])
         exploration = self.explore(
-            task=task,
-            knowledge_base=self.qna,
-            previously_completed_tasks=self.latest_render
+            current_task=task,
+            # task_tree=render_optimus_tree(self.nodes[0])
+            # knowledge_base=self.qna,
+            # past_task_reports=[
+            #     {"task_id": idx, "task": node.name, "is_report_available": node.prediction is not None}
+            #     for idx, node in enumerate(self.nodes)
+            #     # if node.prediction is not None
+            # ]
         )
         # self.unclassified_traces += [exploration.trajectory]
+        # self.latest_render = render_optimus_tree(self.nodes["root"])
 
         # Store answer to human task in QnA dataset.
         # if self.cursor == "root":
@@ -75,16 +81,22 @@ class CtxSeg(dspy.Module):
         Expand on explorer-worker segmentation with knowledge_base
         """
         log_internal_event(f"Exploring: ({task})")
-        if len(self.nodes.items()) == 0:
-            self.nodes = {"root": Node(task, prediction=None)}
+        if len(self.nodes) == 0:
+            self.nodes = [Node(task, prediction=None, id=self.cursor)]
 
-        self.latest_render = render_optimus_tree(self.nodes["root"])
         exploration = await self.explore.acall(
-            task=task,
-            knowledge_base=self.qna,
-            previously_completed_tasks=self.latest_render
+            current_task=task,
+            # task_tree=render_optimus_tree(self.nodes[0])
+            # knowledge_base=self.qna,
+            # past_task_reports=[
+            #     {"task_id": idx, "task": node.name, "is_report_available": node.prediction is not None}
+            #     # {"task_id": idx, "task": node.name}
+            #     for idx, node in enumerate(self.nodes)
+            #     # if node.prediction is not None
+            # ]
         )
         # self.unclassified_traces += [exploration.trajectory]
+        # self.latest_render = render_optimus_tree(self.nodes["root"])
 
         # Store answer to human task in QnA dataset.
         # if self.cursor == "root":
@@ -96,28 +108,43 @@ class CtxSeg(dspy.Module):
         #     report=exploration.report
         # )
 
-    async def advance(self, prompt: str):
+    # async def discover(self):
+    #     """Prompt an agent in natural language to discover"""
+    #     pass
+    async def advance(self, task: str):
         """
-        Prompt a simple AI agent to perform a straightforward action for you.
+        Prompt an agent in natural language to perform one trivial, minimal step.
         """
-        log_internal_event(f"Advancing: ({prompt})")
+        log_internal_event(f"Advancing: ({task})")
 
-        self.nodes = self.nodes | {
-            prompt: Node(
-                prompt,
-                parent=self.nodes[self.cursor],
-                prediction=None
-            )
-        }
-        self.latest_render = render_optimus_tree(self.nodes["root"])
+        # self.latest_render = render_optimus_tree(self.nodes["root"])
+
+        # 1. Create a new node and point the cursor at it
+        self.task_count += 1
+        self.nodes += [Node(task, parent=self.nodes[self.cursor], prediction=None, id=self.task_count)]
+        # self.cursor += 1
+
+        # 2. Perform a ReAct loop with MCP tools
+        render_optimus_tree(self.nodes[0])
         exploitation = await stream_dspy_program(
             self.exploit,
-            task=prompt,
-            knowledge_base=self.qna,
-            previously_completed_tasks=self.latest_render
+            current_task=task,
+            # task_tree=render_optimus_tree(self.nodes[0])
+            # knowledge_base=self.qna,
+            # past_task_reports=[
+            #     {"task_id": idx, "task": node.name, "is_report_available": node.prediction is not None}
+            #     # {"task_id": idx, "task": node.name}
+            #     for idx, node in enumerate(self.nodes)
+            #     # if node.prediction is not None
+            # ]
         )
-        self.nodes[prompt].prediction = exploitation
+
+        # 3. Fill new node with prediction data
+        self.nodes[self.cursor].prediction = exploitation
         # self.unclassified_traces += [exploitation.trajectory]
+
+        # # 4. Restore original cusor
+        # self.cursor -= 1
 
         # self.latest_render = render_optimus_tree(self.nodes["root"])
 
@@ -125,54 +152,49 @@ class CtxSeg(dspy.Module):
 
     async def branch(self, tasks: list[str]):
         """
-        Split a non-trivial situation into distinct parallel branches.
+        Split non-trivial tasks or a list of tasks into parallel branches, independent of each other.
         """
         # Prompt a team of AI agents to perform one or more parallel actions for you.
         # Split a larger or more complex situation into multiple prompts to be delegated.
         log_internal_event(f"Branching: ({json.dumps(tasks, indent=4)})")
         try:
+            # if len(tasks) == 1:
+            #     return await self.advance(task=tasks[0])
+            old_cursor = self.cursor
             for task in tasks:
-                # 1. Create new node and point the cursor at its name
-                self.nodes = self.nodes | {task: Node(
-                    task,
-                    parent=self.nodes[self.cursor],
-                    prediction=None,
-                )}
-                self.cursor = self.nodes[task].name
+                # 1. Create new node and point the cursor at its id
+                self.task_count += 1
+                self.nodes += [Node(task, parent=self.nodes[self.cursor], prediction=None, id=self.task_count)]
+                self.cursor = self.task_count
 
                 # 2. Recurse down the tree
+                render_optimus_tree(self.nodes[0])
                 program = await stream_dspy_program(
                     self.explore,
-                    task=task,
-                    knowledge_base=self.qna,
-                    previously_completed_tasks=self.latest_render
+                    current_task=task,
+                    # task_tree=render_optimus_tree(self.nodes[0])
+                    # knowledge_base=self.qna,
+                    # past_task_reports=[
+                    #     {"task_id": idx, "task": node.name, "is_report_available": node.prediction is not None}
+                    #     # {"task_id": idx, "task": node.name}
+                    #     for idx, node in enumerate(self.nodes)
+                    #     # if node.prediction is not None
+                    # ]
                 )
 
                 # 3. Fill new node with prediction data
-                self.nodes[task].prediction = program
+                self.nodes[self.cursor].prediction = program
 
-                # 4. Restore cursor while going back up the tree
-                self.cursor = self.nodes[task].parent.name
+                # # 4. Restore cursor while going back up the tree
+                # self.cursor -= 1
 
                 # self.latest_render = render_optimus_tree(self.nodes["root"])
 
+            self.cursor = old_cursor
             return [
                 {"task": task, "report": self.nodes[task].prediction.report}
                 for task in tasks
             ]
-            # return [
-            #     {
-            #         "task": task,
-            #         "report":
-            #             # self.execute(prompt)
-            #             # if prompts_are_trivial else
-            #             (await stream_dspy_program(
-            #                 self.explore,
-            #                 task=task,
-            #                 knowledge_base=self.qna)).report
-            #     }
-            #     for task in tasks
-            # ]
         except Exception as e:
             log_error(f"{e}")
             input("Debug > ")
@@ -181,12 +203,12 @@ class CtxSeg(dspy.Module):
         """
         Asking the right questions is the first step towards learning when you are stuck.
         Dispel any doubt regarding any of:
-            - environment-specific knowledge that the user might have.
-            - possible information the user has that would make things much simpler.
-            - missing information needed to complete an operation.
             - cross-checking before making important decisions.
             - problems with tool calls.
+            - missing information that cannot be retrieved by any agent.
         """
+        # - environment-specific knowledge that the user might have, that would make things much simpler.
+
         # This is called when an Explorer feels stuck.
         # TODO: Branch a chat with the user to get unstuck.
         # TODO: do not ask human if question is already known
@@ -204,6 +226,14 @@ class CtxSeg(dspy.Module):
         print("#########################################")
         print(f"{json.dumps([data.question for data in self.qna], indent=4)}")
         return answers
+
+    def recall(self, task_id: int):
+        """Retrieve a report by ID from a completed task in the task tree."""
+        return {
+            "task_id": task_id,
+            "task": self.nodes[task_id].name,
+            "report": self.nodes[task_id].prediction.report
+        } if self.nodes[task_id].prediction is not None else "Report not yet available."
 
     # def chat(self):
     #     """

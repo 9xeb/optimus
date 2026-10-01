@@ -67,7 +67,12 @@ def render_optimus_tree(root: Node) -> str:
         print("################# RENDER ##############")
         render = ""
         for pre, _, node in RenderTree(root):
-            payload = {"task": node.name, "complete": node.prediction is not None}
+            payload = {
+                "task_id": node.id,
+                "task": node.name,
+                # "completed": node.prediction is not None
+                # "response": node.prediction.report if node.prediction is not None else "Not yet available."
+            }
             print(f"{pre}{payload}")
             render += f"{pre}{payload}\n"
         print("#######################################")
