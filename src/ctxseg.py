@@ -40,7 +40,6 @@ class CtxSeg(dspy.Module):
         self.nodes = []
         self.task_count = 0
         self.cursor = 0
-        self.latest_render = None
 
         # TODO: MCP tool to python function wrapper with tool approval
         # TODO: tmux and replace self.exploit with an external call to opencode/codex
@@ -55,16 +54,7 @@ class CtxSeg(dspy.Module):
 
         exploration = self.explore(
             current_task=task,
-            # task_tree=render_optimus_tree(self.nodes[0])
-            # knowledge_base=self.qna,
-            # past_task_reports=[
-            #     {"task_id": idx, "task": node.name, "is_report_available": node.prediction is not None}
-            #     for idx, node in enumerate(self.nodes)
-            #     # if node.prediction is not None
-            # ]
         )
-        # self.unclassified_traces += [exploration.trajectory]
-        # self.latest_render = render_optimus_tree(self.nodes["root"])
 
         # Store answer to human task in QnA dataset.
         # if self.cursor == "root":
@@ -72,9 +62,6 @@ class CtxSeg(dspy.Module):
         log_internal_event(f"Stored answer to: {json.dumps([task], indent=4)} in dataset.")
 
         return exploration
-        # return dspy.Prediction(
-        #     report=exploration.report
-        # )
 
     async def aforward(self, task, **kwargs):
         """
@@ -86,17 +73,7 @@ class CtxSeg(dspy.Module):
 
         exploration = await self.explore.acall(
             current_task=task,
-            # task_tree=render_optimus_tree(self.nodes[0])
-            # knowledge_base=self.qna,
-            # past_task_reports=[
-            #     {"task_id": idx, "task": node.name, "is_report_available": node.prediction is not None}
-            #     # {"task_id": idx, "task": node.name}
-            #     for idx, node in enumerate(self.nodes)
-            #     # if node.prediction is not None
-            # ]
         )
-        # self.unclassified_traces += [exploration.trajectory]
-        # self.latest_render = render_optimus_tree(self.nodes["root"])
 
         # Store answer to human task in QnA dataset.
         # if self.cursor == "root":
@@ -104,9 +81,6 @@ class CtxSeg(dspy.Module):
         log_internal_event(f"Stored answer to: {json.dumps([task], indent=4)} in dataset.")
 
         return exploration
-        # return dspy.Prediction(
-        #     report=exploration.report
-        # )
 
     # async def discover(self):
     #     """Prompt an agent in natural language to discover"""
@@ -117,36 +91,20 @@ class CtxSeg(dspy.Module):
         """
         log_internal_event(f"Advancing: ({task})")
 
-        # self.latest_render = render_optimus_tree(self.nodes["root"])
-
         # 1. Create a new node and point the cursor at it
         self.task_count += 1
         self.nodes += [Node(task, parent=self.nodes[self.cursor], prediction=None, id=self.task_count)]
-        # self.cursor += 1
 
         # 2. Perform a ReAct loop with MCP tools
         render_optimus_tree(self.nodes[0])
         exploitation = await stream_dspy_program(
             self.exploit,
             current_task=task,
-            # task_tree=render_optimus_tree(self.nodes[0])
-            # knowledge_base=self.qna,
-            # past_task_reports=[
-            #     {"task_id": idx, "task": node.name, "is_report_available": node.prediction is not None}
-            #     # {"task_id": idx, "task": node.name}
-            #     for idx, node in enumerate(self.nodes)
-            #     # if node.prediction is not None
-            # ]
         )
 
         # 3. Fill new node with prediction data
         self.nodes[self.cursor].prediction = exploitation
         # self.unclassified_traces += [exploitation.trajectory]
-
-        # # 4. Restore original cusor
-        # self.cursor -= 1
-
-        # self.latest_render = render_optimus_tree(self.nodes["root"])
 
         return exploitation.report  # this return is just for the agent branch that called it
 
@@ -172,23 +130,10 @@ class CtxSeg(dspy.Module):
                 program = await stream_dspy_program(
                     self.explore,
                     current_task=task,
-                    # task_tree=render_optimus_tree(self.nodes[0])
-                    # knowledge_base=self.qna,
-                    # past_task_reports=[
-                    #     {"task_id": idx, "task": node.name, "is_report_available": node.prediction is not None}
-                    #     # {"task_id": idx, "task": node.name}
-                    #     for idx, node in enumerate(self.nodes)
-                    #     # if node.prediction is not None
-                    # ]
                 )
 
                 # 3. Fill new node with prediction data
                 self.nodes[self.cursor].prediction = program
-
-                # # 4. Restore cursor while going back up the tree
-                # self.cursor -= 1
-
-                # self.latest_render = render_optimus_tree(self.nodes["root"])
 
             self.cursor = old_cursor
             return [
