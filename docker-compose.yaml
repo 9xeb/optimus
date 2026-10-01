@@ -1,13 +1,13 @@
 services:
-  harness:
-    # profile: ["harness"]
-    build: .
-    environment:
-      OPENAI_API_BASE: http://127.0.0.1:8080/v1
-      OPENAI_API_KEY: 1234
-      OPENAI_API_MODEL: openai/local
-      MCP_CONFIG: "/home/optimus/mcp_config.json"
-    network_mode: "host"
+  # harness:
+  #   # profile: ["harness"]
+  #   build: .
+  #   environment:
+  #     OPENAI_API_BASE: http://127.0.0.1:8080/v1
+  #     OPENAI_API_KEY: 1234
+  #     OPENAI_API_MODEL: openai/local
+  #     MCP_CONFIG: "/home/optimus/mcp_config.json"
+  #   network_mode: "host"
   runner:
     # profiles: ["runner"]
     image: ghcr.io/ggml-org/llama.cpp:server-b10454
@@ -28,7 +28,7 @@ services:
       # LLAMA_ARG_N_CPU_MOE: 18
       LLAMA_ARG_REASONING: off  # on|off|auto
     ports:
-      - 127.0.0.1:8080:8080
+      - 127.0.0.1:8081:8080
     volumes:
       - hf-cache:/root/.cache/huggingface
     restart: unless-stopped
