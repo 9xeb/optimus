@@ -21,8 +21,8 @@ async def main():
     """
     Connects Optimus with User Interface
     """
+    optimus = Optimus(approval=args.approval)
     while True:
-        optimus = Optimus(approval=args.approval)
         prompt = input("> ")
         print(await optimus.solve(prompt))
     # await asyncio.gather(
