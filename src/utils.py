@@ -1,12 +1,23 @@
+import asyncio 
 import numpy
 import dspy
 import json
+from colorama import Fore, Style
 # from json_repair import repair_json
 from anytree import Node, RenderTree
 
 from src.log import log_internal_event, log_error
 
-async def stream_dspy_program(module: dspy.Module, **kwargs):
+def prettify_chunk(chunk: dspy.streaming.StreamResponse):
+    """Wrap a chunk with colors"""
+    if chunk.signature_field_name == "next_thought":
+        return Fore.GREEN + chunk.chunk
+    elif chunk.signature_field_name.startswith("next_tool"):
+        return Fore.YELLOW + chunk.chunk
+    else:
+        return Style.RESET_ALL + chunk.chunk
+
+async def stream_dspy_program(queues: list[asyncio.Queue], module: dspy.Module, **kwargs):
     """
     Output streaming util for DSPy programs.
     Args:
@@ -40,17 +51,25 @@ async def stream_dspy_program(module: dspy.Module, **kwargs):
         ]
     )
     # Run program=module+arguments and stream output fields
+    # log_internal_event("Beginning streaming")
     try:
         prediction = ""
         async for chunk in streamer(**kwargs):          # pass signature values to module inside streamer
             if isinstance(chunk, dspy.streaming.StreamResponse):
                 # when multi-output, chunk.signature_field_name is the name of the output that the chunk belongs to
-                print(f"{chunk.chunk}", end="", flush=True)
+                # print(f"{chunk.chunk}", end="", flush=True)
+                for queue in queues:
+                    # await queue.put(chunk)
+                    # await queue.put({"task": kwargs["task"], "chunk": chunk})
+                    await queue.put({"task": kwargs["task"]["title"], "data": chunk})
+                    # await asyncio.sleep(0)
+                # yield f"{chunk.chunk}"
                 # await self.message_queue.put(chunk.chunk)
             elif isinstance(chunk, dspy.Prediction):      # the last chunk with final response is a Prediction
                 prediction = chunk
     except* AttributeError as e:
         # except* unwraps any exceptions raised under BaseExceptionGroup, which happens with dspy.RLM
+        log_error(f"Streaming error: {e}")
         pass    # skip current bug where some dspy.RLM predictors have broken chunks
     return prediction
 

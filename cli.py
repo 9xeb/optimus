@@ -1,7 +1,9 @@
 import asyncio
 import argparse
+# import dspy
 
 from src.optimus import Optimus
+from src.utils import prettify_chunk
 
 parser = argparse.ArgumentParser(
     prog="optimus",
@@ -16,6 +18,9 @@ parser.add_argument('-a', '--approval', action='store_true', help='Enable tool a
 args = parser.parse_args()
 
 # TODO: build a static binary for this cli
+# TODO: operate CLI in two modes: local or remote.
+#   Local is for testing out Optimus or single users.
+#   Remote attaches to an Optimus backend for team work.
 
 async def main():
     """
@@ -24,9 +29,7 @@ async def main():
     optimus = Optimus(approval=args.approval)
     while True:
         prompt = input("> ")
-        print(await optimus.solve(prompt))
-    # await asyncio.gather(
-    #     optimus.consume_tasks()
-    # )
+        async for chunk in optimus.grow(prompt):
+            print(prettify_chunk(chunk["data"]), end="", flush=True)
 
 asyncio.run(main())

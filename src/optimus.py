@@ -11,12 +11,12 @@ from mcp.client.streamable_http import streamable_http_client
 from src.utils import stream_dspy_program, require_approval
 from src.log import log_internal_event, log_error
 
-from src.ctxseg import CtxSeg
+from src.ctxseg import RCS
 from src.deact import DeAct
 
 class Optimus():
     """
-    Adds an interface to CtxSeg module.
+    Adds an interface to RCS module.
     Support env vars for connecting to OpenAI compatible APIs, Mlflow and a single MCP server.
     """
     def __init__(self, approval: bool = False):
@@ -37,21 +37,24 @@ class Optimus():
             mlflow.set_experiment("Optimus")
             mlflow.autolog()
 
-        # self.tasks = asyncio.Queue()
         self.tasks = {}
-        # self.tasks_queue = asyncio.Queue()      # branches and leaves
-        # self.questions = asyncio.Queue()
 
         self.approval = approval
 
         # set of optimization rules. Acts as dspy dataset for LLM-powered optimizers.
-        self.constitution = {"Article 1": input("Define constitution > ")}
-        self.judge = dspy.ChainOfThought("constitution, trace -> verdict, approved: bool")
+        # self.constitution = {"Article 1": input("Define constitution > ")}
+        # self.judge = dspy.ChainOfThought("constitution, trace -> verdict, approved: bool")
 
+    async def pick(self, task_title: str):
+        """Run an existing task with its dependencies as-is"""
+        # Useful for cron jobs and manual user clicks from the console
+        # WARNING: grow can pick so this method is implied by grow
+        pass
 
-    async def solve(self, task):
+    # TODO: rename 'solve' to 'grow' or 'explore' or 'feed'
+    async def grow(self, task):
         """
-        Consume a problem with CtxSeg+MCP
+        Consume a problem with RCS+MCP
         """
         try:
             async with streamable_http_client(os.environ["MCP_GATEWAY"]) as (read, write):
@@ -79,19 +82,29 @@ class Optimus():
                     # Tools have .name, .desc that can be used for discovery
                     log_internal_event(f"MCP TOOLS: {[tool.name for tool in mcp_tools]}")
 
-                    agent = CtxSeg(tools=mcp_tools, tasks=self.tasks)
-                    optimus_output = await stream_dspy_program(
-                        agent,
-                        task=task
-                    )
-                    print("CtxSeg is finished", flush=True)
-                    # print(f"Traces: {agent.unclassified_traces}")
-                    print(f"Report: {optimus_output.report}")
+                    agent = RCS(tools=mcp_tools, tasks=self.tasks)
+
+                    # This streams tokens from the recursive ReAct calls inside RCS
+                    # TODO: scale asyncio.create_task for parallel task executions
+                    agent_task = asyncio.create_task(agent.acall(task=task))
+                    try:
+                        while True:
+                            # chunk = await self.tokens.get()
+                            chunk = await agent.tokens.get()
+                            if chunk is None:
+                                break
+                            yield chunk
+                        # Surface agent exceptions instead of losing time
+                        await agent_task
+                    finally:
+                        if not agent_task.done():
+                            agent_task.cancel()
+                            # Let it observe CancelledError and run its own cleanup
+                            await asyncio.gather(agent_task, return_exceptions=True)
+                            log_error(f"Task {task} cancelled by client.")
         except Exception as e:
             log_error(f"MCP Tool error or timeout: {e}")
-            return "Optimus error: {e}"
-        # log_internal_event(f"[OPTIMUS] Got report: {optimus_output.report}")
-        return optimus_output.report
+            raise e
 
     async def consume_tasks(self):
         """
@@ -106,6 +119,6 @@ class Optimus():
     async def optimize(self, task):
         """Optimize programs for a specific task"""
         # Use self.constitution as dataset
-        # Wrap around GEPA to optimize CtxSeg.explore programs
+        # Wrap around GEPA to optimize RCS.explore programs
         # Consider if self.tasks can be used as part of dataset
         pass

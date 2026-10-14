@@ -1,6 +1,6 @@
 # json5
 # json-repair
-
+colorama==0.4.6
 # pydantic-ai-slim[openai]==1.86.0
 # pydantic-ai-slim[mcp]==1.86.0
 
@@ -21,6 +21,10 @@ headroom==0.2.7
 
 # Tree rendering
 anytree==2.13.0
+pyvis==0.3.2
+
+fastapi==0.143.0
+uvicorn==0.54.0
 
 # Unit testing
 pytest==9.1.1

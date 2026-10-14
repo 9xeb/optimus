@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass, field
 import datetime
 from enum import Enum
@@ -15,7 +16,7 @@ from src.utils import stream_dspy_program, render_optimus_tree
 @dataclass
 class Task:
     """A payload containing a task and its dependencies"""
-    title: str
+    title: str = field(metadata={"description": "Title of the task. Must clearly include the items involved."})
     task: str
     kind: str = field(metadata={"description": "The kind of task between: simple, complex."})
     ttl: int = field(metadata={"description": "How long a report from this task should be considered valid, in minutes."})
@@ -24,7 +25,7 @@ class Task:
     dependencies: list[str] = field(metadata={"description": "Titles of previous tasks that this task would benefit from knowing about."})
     # dependencies: list[str] = field(metadata={"description": "Previous task titles that this task depends on."})
 
-class CtxSeg(dspy.Module):
+class RCS(dspy.Module):
     """
     Context Segmentation in DSPy. Based on the paper submitted at RAISE 2026, with a few twists:
         1. give_up tool is replaced with escalate (up). run_strategy tool is replaced with branch (down).
@@ -48,19 +49,13 @@ class CtxSeg(dspy.Module):
         # self.good_traces = []       # good traces upon human review
         # self.bad_traces = []        # bad traces upon human review
 
-        self.standard_signature = "task, info -> report"
+        # self.standard_signature = "task, info -> report"
+        self.standard_signature = "task, info -> steps_taken, report"
         self.explore = dspy.ReAct(
             signature=self.standard_signature,
-            # tools=[self.tap, self.branch, self.escalate]
-            # tools=[self.branch, self.escalate]
-            tools=[dspy.Tool(self.memory), dspy.Tool(self.agents), dspy.Tool(self.user)]
+            # tools=[dspy.Tool(self.agents), dspy.Tool(self.user)]
+            tools=[dspy.Tool(self.agents), dspy.Tool(self.memory)]
         )
-        # self.exploit = dspy.ReAct(
-        #     signature="task, info -> report",
-        #     # tools=[self.tap, self.branch, self.escalate] + self.external_tools
-        #     # tools=[self.list_tools, self.load_tool]
-        #     tools=self.external_tools
-        # )
         self.explorers = [
             {
                 "description": "General purpose problem solving.",
@@ -68,21 +63,8 @@ class CtxSeg(dspy.Module):
                     signature=self.standard_signature,
                     tools=[dspy.Tool(self.agents), dspy.Tool(self.user)]
                 )
-                # "agent": dspy.ReAct(signature="task, info -> report", tools=self.external_tools)
             }
         ]   # list of compiled dspy explorers of previously known tasks
-
-        # Escalating to human.
-        # #################### HUMAN REQUIRED #####################
-        # I need to check the logs and events for the pod 'alpha-app' in the 'alpha' namespace to determine the cause of 'CrashLoopBackOff'. Do I have access to a tool that can execute 'kubectl logs' or 'kubectl describe pod'?
-        # Answer > 
-
-
-        # TODO: break away from rigid tree structure via cheap decisions. Branch becomes Pool.
-        # The underlying structure is a loose pool of tasks.
-        # self.explore adds to possible tasks **that depend on each other** to pool.
-        # intermediate decision level chooses which task to do next and **which other task** output it should see
-        # self.exploit DeActs on a task when
 
         # TODO: replace this with decision model loop
         # self.exploit = DeAct(
@@ -90,21 +72,19 @@ class CtxSeg(dspy.Module):
         #     tools=self.external_tools
         # )
 
-        # Setup execution tree and navigation
-        self.nodes = []
-        self.task_count = 0
-        self.cursor = 0
+        self.tokens = asyncio.Queue()
+        self.tokens_per_task = {}
 
-        # TODO: MCP tool to python function wrapper with tool approval
+        # this tracks the name of the current task before a new task takes over
+        # allows agent tools to connect dependencies as they are grown by the harness
+        self.focus = None     # Task focus, used to connect dependencies
+
         # TODO: tmux and replace self.exploit with an external call to opencode/codex
 
     def forward(self, task, **kwargs):
         """
         Expand on explorer-worker segmentation with knowledge_base
         """
-        if len(self.nodes) == 0:
-            self.nodes = [Node(task, prediction=None, id=self.cursor)]
-
         exploration = self.agents(
             tasks=[Task(title=task, task=task, kind="complex", dependencies=[], ttl=60)]
         )
@@ -115,16 +95,35 @@ class CtxSeg(dspy.Module):
         """
         Expand on explorer-worker segmentation with knowledge_base
         """
-        if len(self.nodes) == 0:
-            self.nodes = [Node(task, prediction=None, id=self.cursor)]
-        exploration = await self.agents(
-            tasks=[Task(title=task, task=task, kind="complex", dependencies=[], ttl=60)]
+        # exploration = await self.agents(
+        #     tasks=[Task(title=task, task=task, kind="complex", dependencies=[], ttl=60)]
+        # )
+        # Direct recursion starts here
+        exploration = await self.recurse(
+            module=self.explore,
+            # task=task.task,
+            # task=json.dumps({"kind": task.kind, "task": task.task}),
+            task={"title": task, "task": task},
+            # Partial view of the tasks graph according to dependencies
+            info=[{"current_time": datetime.datetime.now()}] + [
+                {
+                    "title": old_title,
+                    "status": "Report available in memory",
+                    "task": old_task["task"],
+                    "kind": old_task["kind"],
+                    "dependencies": old_task["dependencies"]
+                } # partial task view
+                for old_title,old_task in self.tasks.items()
+                if self.tasks[old_title].get("report")
+            ]
         )
+
+        await self.tokens.put(None) # signal end of CtxSeg loop
         return dspy.Prediction(report=exploration[0]["report"])
 
     async def agents(self, tasks: list[Task]):
         """
-        Run a multi-task architecture.
+        Run a new multi-task architecture.
         You must queue as many tasks as possible given what is known so far, in order to reduce your cognitive load in the future.
         Do not submit redundant tasks, and break down complex into simple whenever possible.
 
@@ -139,95 +138,117 @@ class CtxSeg(dspy.Module):
             missing_dependencies += list(set(task.dependencies).difference(available_tasks))
         # log_internal_event(f"[AGENTS] Missing dependencies: {missing_dependencies}")
         if len(missing_dependencies) > 0:
-            return [{"report": f"Error: missing requested task titles dependencies: {missing_dependencies}. Use completed task titles when declaring dependencies."}]
+            return [{
+                "report": f"Dependencies Error: the following requested task titles do not exist: {missing_dependencies}."
+            }]
 
-        try:
+        if self.focus is not None:
+            # Pre-flight redundancy check
             for task in tasks:
-                log_internal_event(f"[AGENTS] Triggered task type {task.kind}")
-                # 0. Attempt a cache hit on previously reported tasks
-                if self.tasks.get(task.title):
-                    # Determine expiration time of cached report
-                    expiration_time = datetime.datetime.fromisoformat(self.tasks[task.title]["timestamp"]) + datetime.timedelta(minutes=self.tasks[task.title]["ttl"])
-                    # If current date is not yet past expiration time, cache is valid and report generation is skipped for this turn
-                    if datetime.datetime.now() <= expiration_time:
-                        log_internal_event(f"[AGENTS] Cached {task.title} within TTL")
-                        continue    # skip this task and trust the cache in self.tasks
-                    else:
-                        log_internal_event(f"[AGENTS] Cached {task.title} TTL expired")
+                if (
+                    task.title == self.focus.title
+                    or task.task == self.focus.task
+                ) and task.kind == self.focus.kind:
+                    return [{
+                        "report": f"Redundancy Error: you submitted the same task that you are required to perform: {task.title}."
+                    }]
+            # # Connect pin with current task in network
+            # for task in tasks:
+            #     if task.title not in self.focus.dependencies:
+            #         self.focus.dependencies += [task.title]
+            #         # self.focus.dependencies.append(task.title)
 
-                info = [{"current_time": datetime.datetime.now()}]
-                # 1. Recursively refresh info from dependencies
-                info += await self.agents(
-                    tasks=[
-                        Task(
-                            title=dependency,
-                            task=self.tasks[dependency]["task"],
-                            kind=self.tasks[dependency]["kind"],
-                            ttl=self.tasks[dependency]["ttl"],
-                            dependencies=self.tasks[dependency]["dependencies"]
-                        )
-                        for dependency in task.dependencies
-                    ]
-                ) # Visible reports from dependencies
+        for task in tasks:
+            # self.focus = task
+            log_internal_event(f"[AGENTS] Triggered task type {task.kind}")
 
-                # info = [{"current_time": datetime.datetime.now()}] + [
-                #     {"title": old_title, "status": "complete"} | old_task
-                #     for old_title,old_task in self.tasks.items()
-                #     if old_title in task.dependencies
-                # ]
-
-                # 2. Route to correct module
-                if task.kind.lower() in ["simple"]:
-                    module = dspy.ReAct(signature=self.standard_signature, tools=self.external_tools)
+            # 0. Attempt a cache hit on previously reported tasks
+            if self.tasks.get(task.title):
+                # Determine expiration time of cached report
+                expiration_time = datetime.datetime.fromisoformat(self.tasks[task.title]["timestamp"]) + datetime.timedelta(minutes=self.tasks[task.title]["ttl"])
+                # If current date is not yet past expiration time, cache is valid and report generation is skipped for this turn
+                if datetime.datetime.now() <= expiration_time:
+                    log_internal_event(f"[AGENTS] Cached {task.title} within TTL")
+                    continue    # skip this task and trust the cache in self.tasks
                 else:
-                    module = self.explore
-                    # Additional partial info from non-dependency tasks, only for complex modules
-                    info += [
-                        {
-                            "title": old_title,
-                            # "status": "complete",
-                            "status": "Report available",
-                            "task": old_task["task"],
-                            "kind": old_task["kind"],
-                            "dependencies": old_task["dependencies"]
-                        } # partial task view
-                        for old_title,old_task in self.tasks.items()
-                        if old_title not in task.dependencies
-                    ]
+                    log_internal_event(f"[AGENTS] Cached {task.title} TTL expired")
+            info = [{"current_time": datetime.datetime.now()}]
 
+            # 1. Recursively refresh info from dependencies
+            info += await self.agents(
+                tasks=[
+                    Task(
+                        title=dependency,
+                        task=self.tasks[dependency]["task"],
+                        kind=self.tasks[dependency]["kind"],
+                        ttl=self.tasks[dependency]["ttl"],
+                        dependencies=self.tasks[dependency]["dependencies"]
+                    )
+                    for dependency in task.dependencies
+                ]
+            ) # Visible reports from dependencies
+
+            # 2. Route to module according to task's kind
+            if task.kind.lower() in ["simple"]:
+                module = dspy.ReAct(signature=self.standard_signature, tools=self.external_tools)
+            else:
+                module = self.explore
+                # Add partial info from non-dependency tasks, only for complex modules
+                info += [
+                    {
+                        "title": old_title,
+                        "status": "Report available in memory",
+                        "task": old_task["task"],
+                        "kind": old_task["kind"],
+                        "dependencies": old_task["dependencies"]
+                    } # partial task view
+                    for old_title,old_task in self.tasks.items()
+                    if old_title not in task.dependencies and self.tasks[old_title].get("report")
+                ]
+            try:
+                # Wake up task
+                # TODO: signal with an asyncio.Queue so another loop can pick up all awake tasks efficiently
+                self.tasks[task.title] = (
+                    self.tasks[task.title] if self.tasks.get(task.title) else {}
+                ) | {
+                    "kind": task.kind,
+                    "task": task.task,                
+                    "dependencies": task.dependencies,
+                    "state": "awake",
+                }
+
+                previous = self.focus
+                self.focus = task       # switch focus
                 execution = await self.recurse(
                     module=module,
                     # task=task.task,
                     # task=json.dumps({"kind": task.kind, "task": task.task}),
-                    task={"kind": task.kind, "task": task.task},
+                    task={"title": task.title, "task": task.task},
                     # Partial view of the tasks graph according to dependencies
                     info=info,
                 )
+                self.focus = previous   # restore previous focus
+            except dspy.LMError as e:
+                log_error(f"[AGENTS] {task} ERROR: {e}")
+                self.tasks[task.title] = self.tasks[task.title] | {"state": "failing"}
+                continue    # skip task update
 
-                # 4. Update tasks dataset
-                self.tasks[task.title] = {
-                    # "kind": "operation", # worker | manager | researcher
-                    "kind": task.kind,
-                    "task": task.task,
-                    "dependencies": task.dependencies,
-                    "report": execution.report,
-                    "timestamp": datetime.datetime.now().isoformat(),
-                    "ttl": task.ttl
-                    # TODO: .fromisoformat() to do datetime calculations (e.g. cache TTL)
-
-                    # "best_known_trajectory": None,  # this is to be compiled with optimizers
-                    # "last_execution": None,
-                    # "volatility": None  # estimate volatility of this task, a.k.a. how often its state would change. Helps determine how long to keep in in cache.
-                }
-
-            # Return reports in LLM-friendly format
-            return [
-                {"title": task.title} | self.tasks[task.title]
-                for task in tasks
-            ]
-        except Exception as e:
-            log_error(f"[AGENTS] {e}")
-            return [{"report": e}]
+            # 4. Update report and put task to sleep
+            self.tasks[task.title] = self.tasks[task.title] | {
+                "state": "sleeping",
+                "dependencies": task.dependencies,  # dependencies can update after execution
+                "report": execution.report,
+                "timestamp": datetime.datetime.now().isoformat(),
+                "ttl": task.ttl
+                # "best_known_trajectory": None,  # this is to be compiled with optimizers
+                # "last_execution": None,
+                # "volatility": None  # estimate volatility of this task, a.k.a. how often its state would change. Helps determine how long to keep in in cache.
+            }
+        # Return reports in LLM-friendly format
+        return [
+            {"title": task.title} | self.tasks[task.title]
+            for task in tasks
+        ]
 
     async def recurse(self, module: dspy.Module, task: dict, info: dict, retries: int = 3):
         """
@@ -237,37 +258,28 @@ class CtxSeg(dspy.Module):
             a report on the task
         """
         try:
-            # 1. Create a new node and point the cursor at it
-            # # self.task_count += 1
-            # # self.nodes += [Node(task, parent=self.nodes[self.cursor], prediction=None, id=self.task_count)]
-
             # Load and run agent configuration
-            # TODO: learning loop is closed here, by loading the best known compiled variant for the most similar task
-            log_payload = {
-                "task": task,
-                "info": info
-            }
+            log_payload = {"task": task, "info": info}
             log_internal_event(f"[RECURSE] {json.dumps(log_payload, indent=4, default=str)}")
-            execution = await stream_dspy_program(
-                # self.exploit,
-                # agent,
-                module,
+            
+            return await stream_dspy_program(
+                queues=[self.tokens],
+                module=module,
                 task=task,
                 info=info
             )
-
-            # 3. Fill new node with prediction data
-            # # self.nodes[self.cursor].prediction = execution
-            # self.unclassified_traces += [exploitation.trajectory]
-
-            return execution
-        except Exception as e:
+        except dspy.LMError as e:
             log_error(f"{e}")
+            # Retry a bunch of times (LLM backend might be flaky)
             if retries > 0:
+                await asyncio.sleep(3)
                 return await self.recurse(module=module, task=task, info=info, retries=retries-1)
             else:
-                return dspy.Prediction(report="CRITICAL AGENT FAILURE")
-            # input("Debug > ")
+                raise e
+
+    # async def notify_user(self, notification: str):
+    #     """Notify user"""
+    #     pass
 
     async def user(self, questions: list[str]):
         """
@@ -283,15 +295,7 @@ class CtxSeg(dspy.Module):
             answers = []
             for question in questions:
                 # # 1. Use decision model to find if answer is in dataset
-                # log_internal_event(f"Triaging dataset for question {question}")
-                # answer = []
-                # for data in self.qna:
-                #     if await stream_dspy_program(
-                #         triage,
-                #         question=question,
-                #         information=data
-                #     ).relevant:
-                #         answer += [data]
+                # TBD
 
                 # # 2. If answer is not in dataset, escalate to human
                 log_internal_event("Escalating to human.")
@@ -311,7 +315,7 @@ class CtxSeg(dspy.Module):
         return answers
 
     async def memory(self, title: str):
-        """Recall a report from a previously known task, by task title."""
+        """Request a report from a previous task, by task title."""
         return await self.agents(
             tasks=[Task(
                 title=title,
@@ -321,22 +325,6 @@ class CtxSeg(dspy.Module):
                 dependencies=self.tasks[title]["dependencies"]
             )]
         ) if title in [key for key,value in self.tasks.items()] else f"Task title: {title} - does not exist."
-
-    # def list_tools(self):
-    #     """List the available additional tools."""
-    #     tool_names = [tool.name for tool in self.external_tools]
-    #     log_internal_event(f"Available tools: {tool_names}")
-    #     return tool_names
-
-    # def load_tool(self, name):
-    #     """Load a tool to make it usable."""
-    #     if name not in self.exploit.tools.keys():
-    #         self.exploit.tools[name] = self.external_tools_dict[name]
-    #         log_internal_event(f"Loaded tool {name}.")
-    #         return f"Loaded tool: {self.external_tools_dict[name]}"
-    #     else:
-    #         log_error(f"Tool {name} already loaded.")
-    #         return f"Tool {name} does not exist."
 
     # def chat(self):
     #     """
