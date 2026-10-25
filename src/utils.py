@@ -1,4 +1,5 @@
-import asyncio 
+import asyncio
+from dataclasses import dataclass, field
 import numpy
 import dspy
 import json
@@ -8,11 +9,41 @@ from anytree import Node, RenderTree
 
 from src.log import log_internal_event, log_error
 
+# This simplified view goes to the LLM
+@dataclass
+class Task:
+    """A payload containing a task and its dependencies"""
+    title: str = field(metadata={"description": "Title of the task. Must include the name of the entities involved, to avoid ambiguities with other, similar tasks applied to other entities."})
+    task: str
+    kind: str = field(metadata={"description": "The kind of task between: simple, complex. Use simple when the task may not be broken down any further."})
+    ttl: int = field(metadata={"description": "How long a report from this task should be considered valid, in minutes."})
+    # volatility: str = field(metadata={"description": "How often the results of the task may change in the future, between: low, medium, high"})
+    # domain: str = field(metadata={"description": "Where the task can be performed between: browser, shell, ide"})
+
+    # dependencies field allows the LLM to write coherent architectures
+    dependencies: list[str] = field(metadata={"description": "Titles of previous tasks that this task would benefit from knowing about."})
+    def __post_init__(self):
+        if self.dependencies is None:
+            self.dependencies = []
+
+@dataclass
+class State:
+    """The state of an Optimus instance"""
+    filepath: str   # where to persist memory
+    tasks: list[Task]
+    focus: str  # the parent task at hand
+    # candidate: list[Task]
+    situation: dict
+    resolution: str
+    event: asyncio.Event
+    tokens: asyncio.Queue
+    job: asyncio.Task
+
 def prettify_chunk(chunk: dspy.streaming.StreamResponse):
     """Wrap a chunk with colors"""
     if chunk.signature_field_name == "next_thought":
         return Fore.GREEN + chunk.chunk
-    elif chunk.signature_field_name.startswith("next_tool"):
+    elif "tool" in chunk.signature_field_name:
         return Fore.YELLOW + chunk.chunk
     else:
         return Style.RESET_ALL + chunk.chunk
@@ -31,14 +62,6 @@ async def stream_dspy_program(queues: list[asyncio.Queue], module: dspy.Module, 
     streamer = dspy.streamify(
         program=module,
         is_async_program=True,
-        # stream_listeners=[
-        #     dspy.streaming.StreamListener(signature_field_name="reasoning")
-        #     ]
-        # stream_listeners=[    # recursively extract all output field names regardless of the module type
-        #     dspy.streaming.StreamListener(signature_field_name=output_field_key)
-        #     for _, (name, predictor) in enumerate(module.named_predictors())
-        #     for output_field_key in predictor.signature.output_fields.keys()
-        # ]
         stream_listeners=[
             dspy.streaming.StreamListener(
                 signature_field_name=output_field_key,
@@ -59,8 +82,8 @@ async def stream_dspy_program(queues: list[asyncio.Queue], module: dspy.Module, 
                 # when multi-output, chunk.signature_field_name is the name of the output that the chunk belongs to
                 # print(f"{chunk.chunk}", end="", flush=True)
                 for queue in queues:
-                    # await queue.put(chunk)
-                    # await queue.put({"task": kwargs["task"], "chunk": chunk})
+                    pretty_chunk = prettify_chunk(chunk)
+                    print(pretty_chunk, end="", flush=True)
                     await queue.put({"task": kwargs["task"]["title"], "data": chunk})
                     # await asyncio.sleep(0)
                 # yield f"{chunk.chunk}"
@@ -100,14 +123,30 @@ def render_optimus_tree(root: Node) -> str:
         log_error(f"{e}")
     return render
 
-def require_approval(func, name):
+def require_approval(state: State, func, name):
     """Simple wrapper for human approval of tool call"""
-    def wrapped(**kwargs):
-        print("\n############# APPROVAL REQUIRED ##############")
-        if input(f"{name} {json.dumps(kwargs, indent=4)} ? (y/N) > ").lower() in ['y', 'yes']:
-            return func(**kwargs)
+    async def wrapped(**kwargs):
+        state.situation = {
+            "type": "tool-approval",
+            "parent": state.focus.title,
+            "tool": name,
+            "args": kwargs
+        }
+        log_internal_event(f"[SITUATION] {state.situation}")
+        await state.event.wait()
+        state.situation = {}
+        state.event.clear()
+        if not state.resolution:    # No feedback from user
+            return await func(**kwargs)
         else:
-            raise PermissionError(f"Tool '{name}' call denied: {kwargs}")
+            log_error(f"Tool '{name}' call denied: {kwargs}. Reason: {state.resolution}")
+            return f"Tool call denied by user. Reason: {state.resolution}"
+            # raise PermissionError(f"Tool '{name}' call denied: {kwargs}")
+        # print("\n############# APPROVAL REQUIRED ##############")
+        # if input(f"{name} {json.dumps(kwargs, indent=4)} ? (y/N) > ").lower() in ['y', 'yes']:
+        #     return func(**kwargs)
+        # else:
+        #     raise PermissionError(f"Tool '{name}' call denied: {kwargs}")
     return wrapped
     
 # def count_tokens(new_messages):

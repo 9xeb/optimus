@@ -1,5 +1,17 @@
+# TODO:
+# - display entire title, not a cut version of it in a single line below the task's node
+# - get rid of minimap and pivot,
+# # - implement tool approval situation in frontend,
+# - support mcp.json and dynamic tool discovery,
+# - improve user experience in UI,
+# - review and simplify and secure frontend,
+# - desktop/mobile app
+# - minimalistic input interface (less clicking, more typing). Single input box, greyed out when no situations or any task is awake (meaning the engine is busy doing something). Emergency button to stop all tasks and go full sleep.
+# - User manual: rule of thumb: approve anything that makes sense and seems related to the task and is not destructive. No need to deep dive into what the agent is doing, that's the point of having an agent
+# - implement tool output scrolling, sort of mini-RLM
+
 import anyio
-# import asyncio
+import asyncio
 import argparse
 import json
 from dataclasses import dataclass
@@ -15,7 +27,7 @@ from src.optimus import Optimus
 # from src.utils import stream_dspy_program
 from src.utils import prettify_chunk
 from src.log import log_error, log_internal_event
-# from src.ctxseg import Task
+from src.ctxseg import Task
 
 parser = argparse.ArgumentParser(
     prog="optimus",
@@ -35,70 +47,117 @@ args = parser.parse_args()
 # GET /tasks to get a pyvista network.html to render and navigate
 app = FastAPI()
 task_lock = anyio.Lock()
-optimus = Optimus(approval=args.approval)
-# Load tasks from file
-if args.file and Path(args.file).exists():
-    with open(args.file, 'r', encoding='utf-8') as f:
-        tasks = json.loads(f.read())
-        log_internal_event(f"Loaded tasks from file: {json.dumps(tasks, indent=4)}")
-        optimus.tasks = tasks
+question_lock = anyio.Lock()
+optimus = Optimus(filepath=args.file, approval=args.approval)
 
+# Load tasks from file
+# if args.file and Path(args.file).exists():
+#     with open(args.file, 'r', encoding='utf-8') as f:
+#         tasks = json.loads(f.read())
+#         log_internal_event(f"Loaded tasks from file: {json.dumps(tasks, indent=4)}")
+#         optimus.state.tasks = tasks
 # Only dataclass and pydantic model end in POST body
 @dataclass
 class TaskPayload():
     """Valid payload for POST requests at /tasks"""
     task: str
 
-@app.post("/tasks", response_class=EventSourceResponse)
+
+@app.post("/tasks")
 async def create_task(task: TaskPayload):
-    """Create a task"""
-    if task_lock.locked():
+    """Submit task and store job"""
+    if optimus.state.job is not None and not optimus.state.job.done():
         # For now, only one concurrent root task is allowed
         raise HTTPException(status_code=409, detail="Optimus is busy with another root task.")
-    async with task_lock:
-        stream = optimus.grow(task.task)
-        try:
-            async for chunk in stream:
-            # async for chunk in optimus.solve(task.task):
-                pretty_chunk = prettify_chunk(chunk["data"])
-                print(pretty_chunk, end="", flush=True)
-                yield ServerSentEvent(data=chunk["data"].chunk, event=chunk["task"])
-                # await anyio.sleep(0)
-        finally:
-            await stream.aclose()
-            log_internal_event(f"Task {task} closed by client.")
-            with open(args.file, 'w', encoding='utf-8') as f:
-                f.write(json.dumps(optimus.tasks, indent=4))
-            log_internal_event(f"Saved tasks to file {args.file}")
+    else:
+        log_internal_event(f"Triggering Optimus")
+        # Detach long-running optimus work
+        # optimus.state.job = await optimus.grow(task.task)
+        optimus.state.job = asyncio.create_task(optimus.grow(task.task))
+        return {"status": "started"}
 
-@app.get("/reports", response_class=EventSourceResponse)
-async def stream_report(task_title: str):
-    """Stream a task report by title"""
-    # We separate task creation from report streaming, in case frontend breaks or is reloaded.
-    pass
+
+@app.post("/tasks/stream", response_class=EventSourceResponse)
+async def stream_tasks():
+    """Resume streaming of tasks in current job"""
+    if optimus.state.job is None or optimus.state.job.done():
+        raise HTTPException(status_code=404, detail="Optimus is idle.")
+    else:
+        # Pick up queue and start streaming all there is
+        while True:
+            chunk = await optimus.state.tokens.get()
+            if chunk:
+                # pretty_chunk = prettify_chunk(chunk["data"])
+                # print(pretty_chunk, end="", flush=True)
+                yield ServerSentEvent(data=chunk["data"].chunk, event=chunk["task"])
+            else:
+                break
+
+@app.post("/tasks/cancel")
+async def cancel_tasks():
+    """Stop the currently running job"""
+    if optimus.state.job is None or optimus.state.job.done():
+        raise HTTPException(status_code=404, detail="Optimus is idle.")
+    else:
+        optimus.state.job.cancel()
+        # Let it observe CancelledError and run its own cleanup
+        await asyncio.gather(optimus.state.job, return_exceptions=True)
+        optimus.state.job = None
+        # Clean up after cancellation
+        log_internal_event("[BACKEND] Cleaning up after client cancellation.")
+        optimus.state.situation = {}
+        optimus.state.tokens = asyncio.Queue()
+        for title,task in optimus.state.tasks.items():
+            if task.get("state") == "awake":
+                task["state"] = "sleeping"
+
+# @app.post("/tasks", response_class=EventSourceResponse)
+# async def create_task(task: TaskPayload):
+#     """Create a task"""
+#     if task_lock.locked():
+#         # For now, only one concurrent root task is allowed
+#         raise HTTPException(status_code=409, detail="Optimus is busy.")
+#     async with task_lock:
+#         stream = optimus.grow(task.task)
+#         try:
+#             async for chunk in stream:
+#             # async for chunk in optimus.solve(task.task):
+#                 pretty_chunk = prettify_chunk(chunk["data"])
+#                 print(pretty_chunk, end="", flush=True)
+#                 yield ServerSentEvent(data=chunk["data"].chunk, event=chunk["task"])
+#                 # await anyio.sleep(0)
+#         except Exception as e:
+#             log_error(f"Backend caught exception: {e}")
+#             return
+#         finally:
+#             await stream.aclose()
+#             log_internal_event(f"Task {task} closed by client.")
+#             if args.file:
+#                 with open(args.file, 'w', encoding='utf-8') as f:
+#                     f.write(json.dumps(optimus.state.tasks, indent=4))
+#             log_internal_event(f"Saved tasks to file {args.file}")
 
 @app.get("/tasks")
 async def tasks_page():
     """Get tasks network"""
-    tasks = optimus.tasks
-    return tasks
+    # tasks = optimus.tasks
+    # return tasks
+    return {
+        "tasks": optimus.state.tasks,
+        # "candidate": {"parent": optimus.state.focus, "tasks": optimus.state.candidate},
+        "situation": optimus.state.situation
+    }
     # return HTMLResponse(net.generate_html())
 
-# @app.get("/tasks", response_class=HTMLResponse)
-# async def tasks_page():
-#     """Get tasks graph"""
-#     net = Network(directed=True, height="750px", width="100%",
-#                   bgcolor="#222222", font_color="white", select_menu=True, cdn_resources="in_line")
-#     net.barnes_hut()
-#     for title, task in optimus.tasks.items():
-#         # Connect each task in network
-#         net.add_node(title, label=title, title=title, metadata=task)
-#         for dependency in task["dependencies"]:
-#             net.add_edge(dependency, title)
-#     # net.add_edges([(3, 1), (3, 2, 5)])  # batch; 3rd tuple element = width
-#     # net.show("digraph.html")
-#     # net.show_buttons(filter_=['physics'])
-#     return HTMLResponse(net.generate_html())
+@app.post("/review")
+async def review_situation(review: dict):
+    """Review situation and provide an optional feedback"""
+    # if optimus.state.situation.get("tasks"):
+    if optimus.state.situation.get("type") in ["task-proposal", "tool-approval", "question"]:
+        optimus.state.resolution = review.get("review")
+        optimus.state.event.set()
+    else:
+        log_internal_event("[BACKEND] There are no pending situations")
 
 @app.get("/", response_class=HTMLResponse)
 async def home_page():
