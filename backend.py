@@ -1,14 +1,23 @@
 # TODO:
-# - display entire title, not a cut version of it in a single line below the task's node
-# - get rid of minimap and pivot,
-# # - implement tool approval situation in frontend,
-# - support mcp.json and dynamic tool discovery,
 # - improve user experience in UI,
 # - review and simplify and secure frontend,
 # - desktop/mobile app
 # - minimalistic input interface (less clicking, more typing). Single input box, greyed out when no situations or any task is awake (meaning the engine is busy doing something). Emergency button to stop all tasks and go full sleep.
+# - try different inspiring visual flavors: network of neurons, galaxy of stars, ...
+
 # - User manual: rule of thumb: approve anything that makes sense and seems related to the task and is not destructive. No need to deep dive into what the agent is doing, that's the point of having an agent
 # - implement tool output scrolling, sort of mini-RLM
+
+# 1. fix name preview being cut under the node;
+# 2. implement pick: trigger non-root tasks directly via API and UI;
+# 3. implement cron: repeat non-root tasks at scheduled intervals;
+# 4. simple background stream of what comes out of /tasks/stream
+# 5. full TUI version of this, callable in a terminal (by providing the backend URL as argument);
+# 6. allow reviewing QnA if anything changes
+# 7. Vibe code a white collar MCP sandbox with file management, notes, email, calendar, logs in to google/microsoft suites, handles secrets and credentials via agent (it's local anyway)
+# 8. backend multiplexing when two UIs are open and consume the same queue of tokens;
+# 9. implement fzf-like search
+# 10. make a truly air-gapped frontend (no CDN for js)
 
 import anyio
 import asyncio
@@ -77,7 +86,7 @@ async def create_task(task: TaskPayload):
         return {"status": "started"}
 
 
-@app.post("/tasks/stream", response_class=EventSourceResponse)
+@app.get("/tasks/stream", response_class=EventSourceResponse)
 async def stream_tasks():
     """Resume streaming of tasks in current job"""
     if optimus.state.job is None or optimus.state.job.done():
@@ -153,11 +162,16 @@ async def tasks_page():
 async def review_situation(review: dict):
     """Review situation and provide an optional feedback"""
     # if optimus.state.situation.get("tasks"):
-    if optimus.state.situation.get("type") in ["task-proposal", "tool-approval", "question"]:
+    if optimus.state.situation.get("type") in ["task-proposal", "tool-approval", "question", "review"]:
         optimus.state.resolution = review.get("review")
         optimus.state.event.set()
     else:
         log_internal_event("[BACKEND] There are no pending situations")
+
+# @app.post("/upload")
+# async def upload_file():
+#     """Upload a file to working memory of root task"""
+#     pass
 
 @app.get("/", response_class=HTMLResponse)
 async def home_page():

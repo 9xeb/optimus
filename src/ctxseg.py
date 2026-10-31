@@ -5,7 +5,8 @@ from enum import Enum
 import json
 import numpy
 import dspy
-from anytree import Node
+# from anytree import Node
+from pathlib import Path
 
 from src.log import log_internal_event, log_error
 from src.utils import stream_dspy_program, render_optimus_tree, State, Task
@@ -23,20 +24,21 @@ class RCS(dspy.Module):
         3. Traces are collected for future optimizations on what went wrong.
     """
     # def __init__(self, tools: list[dspy.Tool] = None, tasks: dict = None, shared_data: dict = None):
-    def __init__(self, state: State, tools: list[dspy.Tool] = None):
+    def __init__(self, state: State, tools: list[dspy.Tool] = None, info: list = None):
         super().__init__()
 
+        self.info = info if info else {}    # additional info to always pass to agents
         self.external_tools = tools if tools else []
         self.external_tools_dict = {
             tool.name: tool
             for tool in tools
         }
         self.state = state
-        # self.qna = []       # merges memory system AND examples for search and compute
-        self.qna = {}       # merges memory system AND examples for search and compute
-        # self.tasks = {} if tasks is None else tasks
-        self.tasks = self.state.tasks
-        self.tasks_queue = asyncio.Queue()  # tiles of tasks to be run
+        # self.state.qna = []       # merges memory system AND examples for search and compute
+        # self.state.qna = {}       # merges memory system AND examples for search and compute
+        # self.state.tasks = {} if tasks is None else tasks
+        # self.state.tasks = self.state.tasks
+        # self.state.tasks_queue = asyncio.Queue()  # tiles of tasks to be run
         self.events = {}            # dictionary of events
         # self.transferable_lessons = []
 
@@ -57,28 +59,27 @@ class RCS(dspy.Module):
         # done_so_far = localized, short term memory
         # root reports = immediately useful for user
         # self.standard_signature = "info: list, task: dict -> trajectory_mistakes: str | None, aggregated_gotchas_for_future_similar_problems: list | None, final_result"
-        self.standard_signature = "info: list, task: dict -> unexpected_transferable_lessons: list | None, final_result"
+        # self.standard_signature = "info: list, task: dict -> unexpected_transferable_lessons: list | None, final_result"
+        log_internal_event(f"[RCS] Building standard signature")
+        self.standard_signature = "info: list, task: dict -> final_result"
+        # self.routing_signature = "info: list, task: dict -> final_result"
         # aggregated_unexpected_experiences_worth_sharing_to_improve_future_agents_with_similar_problems
         # transferable_lessons_for_self_correction
         # generalized_examples_for_future_agents_with_similar_problems
         # NEW_EXAMPLES_NOT_IN_TRAINING_DATASET
         # lessons_learned_for_future_agents_with_similar_problems
         # synthesized_examples_for_future_agents
+        # self.route = dspy.ReAct(
+        #     signature=self.standard_signature,
+        #     tools=[dspy.Tool(self.route)]
+        # )
+        log_internal_event(f"[RCS] Building explorer module")
         self.explore = dspy.ReAct(
             signature=self.standard_signature,
             tools=[dspy.Tool(self.agents), dspy.Tool(self.user)]
             # tools=[dspy.Tool(self.memory), dspy.Tool(self.agents)]
             # tools=[dspy.Tool(self.agents)]
         )
-        # self.explorers = [
-        #     {
-        #         "description": "General purpose problem solving.",
-        #         "agent": dspy.ReAct(
-        #             signature=self.standard_signature,
-        #             tools=[dspy.Tool(self.agents), dspy.Tool(self.user)]
-        #         )
-        #     }
-        # ]   # list of compiled dspy explorers of previously known tasks
 
         # TODO: replace this with decision model loop
         # self.exploit = DeAct(
@@ -88,13 +89,9 @@ class RCS(dspy.Module):
         # self.route = dspy.ChainOfThought(
         #     signature="cached_tasks: list, task: dict -> equivalent_cached_task_title: str | None"
         # )
-
-        # self.state.tokens = asyncio.Queue()
-        # self.tokens_per_task = {}
-
         # this tracks the name of the current task before a new task takes over
         # allows agent tools to connect dependencies as they are grown by the harness
-        self.state.focus = None     # Task focus, used to connect dependencies
+        self.state.parent = None     # Task focus, used to connect dependencies
         self.awakened_list = []
         # self.mistakes = {"simple": "", "complex": ""}
 
@@ -118,281 +115,280 @@ class RCS(dspy.Module):
         """
         Expand on explorer-worker segmentation with knowledge_base
         """
-        self.awakened_list = []
-        exploration = await self.agents(
-            tasks=[Task(title=task, task=task, kind="root", dependencies=[], ttl=60)]
-        )
+        # TODO: add a router step here, redirects to known root task or not
+        # routing = await stream_dspy_program(
+        #     self.route,
+        #     info=[
+        #         {"title": task.title}
+        #         for task in self.state.tasks if task.kind == "root"
+        #     ]            
+        # )
 
-        await self.state.tokens.put(None) # signal end of CtxSeg loop
-        self.state.focus = None   # reset focus
-        
-        # Save tasks to file
+        self.awakened_list = []
+        while task:
+            log_internal_event(f"[RCS] Calling agent for [{task}]")
+            log_error(f"[RCS] Available tasks: {list(self.state.tasks.keys())}")
+            if task in list(self.state.tasks.keys()):
+                # Reuse task if present (can be non-root too)
+                task_payload = Task(
+                    title=task,
+                    task=self.state.tasks[task]["task"],
+                    kind=self.state.tasks[task]["kind"],
+                    dependencies=self.state.tasks[task]["dependencies"],
+                    ttl=self.state.tasks[task]["ttl"]
+                )
+            else:
+                # Create a new root task for unseen problem
+                log_error(f"[RCS] Creating a new root task.")
+                task_payload = Task(title=task, task=task, kind="root", dependencies=[], ttl=60)
+                self.state.parent = task_payload
+
+            exploration = await self.agents(
+                tasks=[task_payload]
+            )
+            await self.state.tokens.put(None) # signal end of CtxSeg loop
+            self.state.parent = None   # reset focus
+
+            # 2. Trigger a situation for feedback
+            self.state.situation = {
+                "type": "review",
+                "task": task
+            }
+                # "question": f"[{task_payload.task}] is done. Anything that you don't like?"
+            log_internal_event(f"[SITUATION] {self.state.situation}")
+            await self.state.event.wait()
+            self.state.situation = {}      # clear situation so backend knows
+            task = self.state.resolution
+            self.state.event.clear()
+
+
+        # 3. Save memories to file
         if self.state.filepath:
             with open(self.state.filepath, 'w', encoding='utf-8') as f:
-                f.write(json.dumps(self.state.tasks, indent=4))
+                f.write(json.dumps({"tasks": self.state.tasks, "qna": self.state.qna}, indent=4))
         log_internal_event(f"[RCS] Saved tasks to file {self.state.filepath}")
 
         return dspy.Prediction(report=exploration[0]["report"])
 
     async def agents(self, tasks: list[Task]):
         """
-        Run new multi-task architectures.
-        You must break down as many tasks as possible given what is known so far, following the principle of separation of contexts.
+        Run the most conservative minimal immediate best next sub-tasks architecture, given what is known so far.
+        If presented with partial information, run an equally partial architecture, since you can always run another one when more info arrives.
 
         Example call:
             next_tool_args = {"tasks": [{"title": "...", "task": "...", "kind": "...", "dependencies": []}]}
         """
+        # Ensure each sub-task is a digestible but meaningful step towards the solution.
+        # Run new multi-task architectures.
+        # You must break down as many tasks as possible given what is known so far, following the principle of separation of contexts.
         # Break down your complex task into simpler tasks whenever possible.
         # Do not submit redundant tasks, and break down complex into simple whenever possible.
         # TODO: Forget unpopular tasks
         #       First, find tasks to delete (use timestamp of last report, or ticking count to zero)
 
-        # Available tasks include those stored in self.tasks and those just submitted in tasks
-        available_tasks = [key for key, value in self.tasks.items()] + [task.title for task in tasks]
-        missing_dependencies = []
-        # System review
-        for task in tasks:
-            # task.dependencies = []  # ignore dependencies generated by LLM (TESTING)
+        # How this works:
+        # 1. Sanity checks (ghost dependencies, broken names, ...)
+        # 2. Human approval
+        # 3. Populate 'info' for RAG
+        # 4. Run task with appropriate dspy program (complex or simple)
 
-            # # Dependency check
-            missing_dependencies += list(set(task.dependencies).difference(available_tasks))
+        try:
+            # Available tasks include those stored in self.state.tasks and those just submitted in tasks
+            available_tasks = [key for key, value in self.state.tasks.items()] + [task.title for task in tasks]
+            ghost_dependencies = []
+            # System review
+            for task in tasks:
+                # if task.kind != "root" and self.state.tasks.get(task.title) and self.state.tasks[task.title]["kind"] == "root":
+                #     # This task was previously recorded as a root task, promote it to complex
+                #     task.kind = "complex"
 
-            if self.state.focus is not None:
-                # Redundancy check: demote task to "simple" to prevent infinite loops
-                # if (
-                #     task.title == self.state.focus.title
-                #     or task.task == self.state.focus.task
-                # ) and task.kind == self.state.focus.kind:
-                # log_error(f"Focus is [{self.state.focus.title}] - Task is [{task.title}]")
+                # Redundancy check
+                log_internal_event(f"[RCS] Redundancy check (does not apply to root tasks)")
+                if task.kind != "root" and self.state.parent is not None:
+                    # title is same as current AND (task does not exists or has no reports)
+                    if task.title.lower() == self.state.parent.title.lower() and (not self.state.tasks.get(task.title) or not self.state.tasks[task.title].get("report")):
+                        # if the LLM submitted the same complex task as a new task, we label it as simple to prevent infinite loops
+                        # Conceptually, it means the LLM cannot further break down but still sees the task as not simple enough, a.k.a. model limitation.
+                        task_payload = {"title": task.title, "task": task.task}
+                        return [{
+                            "report": f"Redundancy Error: breaking down your task into the exact same task is not allowed: {task_payload}."
+                        }]
 
-                # title is same as current AND (task does not exists or has no reports)
-                if task.title.lower() == self.state.focus.title.lower() and (not self.tasks.get(task.title) or not self.tasks[task.title].get("report")):
-                    # if the LLM submitted the same complex task as a new task, we label it as simple to prevent infinite loops
-                    # Conceptually, it means the LLM cannot further break down but still sees the task as not simple enough, a.k.a. model limitation.
-                    # task.title = self.state.focus.title   # override redundant task
-                    # task.kind = "simple"
-                    task_payload = {"title": task.title, "task": task.task}
-                    return [{
-                        # "report": f"Redundancy Error: cannot break down your task in the exact same task: {task_payload}. Try again."
-                        "report": f"Redundancy Error: breaking down your task into the exact same task is not allowed: {task_payload}."
-                    }]
+                # Update list of ghost dependencies
+                ghost_dependencies += list(set(task.dependencies).difference(available_tasks))
 
-            # Backward-expand dependencies network
-            # for task in tasks:
-                # NOTE: the order in dependencies list matters. That's how they came out of the LLM.
-                if task.title not in self.state.focus.dependencies:
-                    # This is what makes the next call to this task cheaper: instead of going through reasoning again, reports are requested by network design.
-                    log_internal_event(f"[{task.title}] becomes dependency of [{self.state.focus.title}]")
-                    self.state.focus.dependencies += [task.title]
-        # log_internal_event(f"[AGENTS] Missing dependencies: {missing_dependencies}")
-        if len(missing_dependencies) > 0:
-            log_error(f"Dependencies Error: the following requested task titles do not exist: {missing_dependencies}.")
-            return [{
-                "report": f"Dependencies Error: the following requested task titles do not exist: {missing_dependencies}."
-            }]
-
-        # for task in tasks:
-        #     # Ensure sane defaults for new task
-        #     if not self.tasks.get(task.title):
-        #         self.tasks[task.title] = {
-        #             "kind": task.kind,
-        #             "task": task.task,
-        #             "dependencies": task.dependencies,
-        #             "ttl": task.ttl,
-        #             # "affinities": [],
-        #             "state": "pending" if task.kind != "root" else "awake"
-        #         }
-
-        # Keep waiting as long as there is at least one pending task
-        # while any([v["state"] == "pending" for k,v in self.tasks.items()]):
-
-        if any(item not in list(self.tasks.keys()) for item in [task.title for task in tasks if task.kind != "root"]):
-            # Wait for human review (if any new task)
-            # log_internal_event(f"[SITUATION] Review new tasks: {tasks}")
-            self.state.situation = {
-                "type": "task-proposal",
-                "parent": self.state.focus.title,
-                "tasks": tasks
-            }
-            log_internal_event(f"[SITUATION] {self.state.situation}")
-            await self.state.event.wait()
-            self.state.situation = {}
-            self.state.event.clear()
-            if self.state.resolution is not None:
-                log_internal_event(f"Review from backend is: {self.state.resolution}")
+            # Ghost dependences check
+            log_internal_event(f"[RCS] Ghost dependencies check")
+            if len(ghost_dependencies) > 0:
+                log_error(f"Dependencies Error: the following requested task titles do not exist: {ghost_dependencies}.")
                 return [{
-                    "report": f"Review not passed. User feedback: [{self.state.resolution}]. Fix your proposed agents."
+                    "report": f"Dependencies Error: the following requested task titles do not exist: {ghost_dependencies}."
                 }]
 
-        for task in tasks:
-            log_internal_event(f"[AGENTS] Triggered task type {task.kind}")
+            # This must be done after ensuring there are no ghost dependencies
+            log_internal_event(f"[RCS] Connecting dependencies")
+            for task in tasks:
+                # Backward-expand dependencies network
+                if task.kind != "root" and self.state.parent is not None:
+                    # NOTE: the order of execution in dependencies list matters. That's how they came out of the LLM.
+                    if task.title not in self.state.parent.dependencies:
+                        # This is what makes the next call to this task cheaper: instead of going through reasoning again, reports are requested by network design.
+                        log_internal_event(f"[{task.title}] becomes dependency of [{self.state.parent.title}]")
+                        self.state.parent.dependencies += [task.title]
 
-            # 0. Attempt a cache hit on previously reported tasks
-            if not self.is_task_expired(task.title):
-                log_internal_event(f"Task [{task.title}] is cached")
-                continue    # skip this task and trust the cache in self.tasks
 
-            info = [{"current_time": datetime.datetime.now().isoformat()}]
+            # Trigger human review
+            if self.state.approval and any(item not in list(self.state.tasks.keys()) for item in [task.title for task in tasks if task.kind != "root"]):
+                log_internal_event(f"[RCS] Triggering human review")
+                # Wait for human review (if any new task)
+                self.state.situation = {
+                    "type": "task-proposal",
+                    "parent": self.state.parent.title,
+                    "tasks": tasks
+                }
+                log_internal_event(f"[SITUATION] {self.state.situation}")
+                await self.state.event.wait()
+                self.state.situation = {}
+                self.state.event.clear()
+                if self.state.resolution is not None:
+                    log_internal_event(f"Review from backend is: {self.state.resolution}")
+                    return [{
+                        "report": f"Review not passed. User feedback: [{self.state.resolution}]. Fix your proposed agents."
+                    }]
 
-            # 1. Recursively refresh dependencies
-            # info += await self.agents(
-            await self.agents(
-                tasks=[
-                    Task(
-                        title=dependency,
-                        task=self.tasks[dependency]["task"],
-                        kind=self.tasks[dependency]["kind"],
-                        ttl=self.tasks[dependency]["ttl"],
-                        dependencies=self.tasks[dependency]["dependencies"]
+            for task in tasks:
+                log_internal_event(f"[AGENTS] Triggered task type {task.kind}")
+
+                # 0. Attempt a cache hit on previously reported tasks
+                if not self.is_task_expired(task.title):
+                    log_internal_event(f"Task [{task.title}] is cached")
+                    continue    # skip this task and trust the cache in self.state.tasks
+
+                # 1. Recursively refresh dependencies
+                await self.agents(
+                    tasks=[
+                        Task(
+                            title=dependency,
+                            task=self.state.tasks[dependency]["task"],
+                            kind=self.state.tasks[dependency]["kind"],
+                            ttl=self.state.tasks[dependency]["ttl"],
+                            dependencies=self.state.tasks[dependency]["dependencies"]
+                        )
+                        for dependency in task.dependencies
+                    ]
+                )
+
+                # 2. Route to module according to task's kind
+                if task.kind.lower() in ["simple"]:
+                    module = dspy.ReAct(
+                        signature=self.standard_signature,
+                        tools=self.external_tools + [dspy.Tool(self.user)]
                     )
-                    for dependency in task.dependencies
+                    # module = dspy.ReActV2(signature=self.standard_signature, tools=self.external_tools)
+                else:
+                    module = self.explore
+                log_internal_event(f"Awakened list: {self.awakened_list}")
+
+                # 3. Build up info for RAG
+                log_internal_event(f"[RCS] Building up info for RAG")
+                info = [{"current_time": datetime.datetime.now(datetime.UTC).isoformat()}]
+                    # {
+                    #     # TODO: Add targeted QnA here
+                    #     # "examples": self.state.tasks[self.state.parent.title].get("unexpected_transferable_lessons")
+                    # },
+                info += [
+                    {
+                        "examples": [
+                            {"question": question, "answer": answer["content"]}
+                            for question,answer in self.state.qna.items()
+                            if answer["kind"] == task.kind
+                        ]
+                    },
+                    {
+                        # "tasks_done_so_far": [
+                        "working_memory": [
+                            {
+                                "title": awakened,
+                                "final_results": self.state.tasks[awakened].get("report"),
+                                # "unexpected_transferable_lessons": self.state.tasks[awakened]["unexpected_transferable_lessons"]
+                            }
+                            for awakened in self.awakened_list
+                        ],
+                    } | self.info
                 ]
-            ) # Visible reports from dependencies
 
-            # 2. Route to module according to task's kind
-            if task.kind.lower() in ["simple"]:
-                module = dspy.ReAct(
-                    signature=self.standard_signature,
-                    tools=self.external_tools + [dspy.Tool(self.user)]
-                )
-                # module = dspy.ReActV2(signature=self.standard_signature, tools=self.external_tools)
-            else:
-                module = self.explore
-
-            log_internal_event(f"Awakened list: {self.awakened_list}")
-            # Cumulative reports of all awakened tasks for this problem
-            info += [
-                {
-                    # Long-term memory, knowledge is accumulated and shared across tasks as the problems unfold
-                    # task.kind determines which examples are seen
-                    "examples": [
-                        # "report" from old tasks is noise
-                        {"title": old_title} | {key: value for key, value in old_task.items() if key != "report"}
-                        for old_title,old_task in self.tasks.items()
-                        if old_task["kind"] == task.kind and (old_title not in self.awakened_list) and old_task.get("report")
-                    ] + [example for question, example in self.qna.items()],
-                    # Short-term memory, a workbench for the root problem
-                    "done_so_far": [
-                        {
-                            "title": awakened,
-                            "report": self.tasks[awakened]["report"],
-                            "unexpected_transferable_lessons": self.tasks[awakened]["unexpected_transferable_lessons"]
+                # 4. Run task
+                log_internal_event(f"[RCS] Running task")
+                try:
+                    # Ensure sane defaults for new task
+                    if not self.state.tasks.get(task.title):
+                        self.state.tasks[task.title] = {
+                            # "affinities": []
                         }
-                        for awakened in self.awakened_list
-                    ],
-                    # "trajectory_mistakes": [
-                    #     for self.tasks if task.get("trajectory_mistakes")
-                    # ]
-                }
-            ]
 
-            try:
-                # # Ensure one queue exists per task
-                # if not self.queues.get(task.title):
-                #     self.queues[task.title] = asyncio.Queue()
-
-                # Ensure sane defaults for new task
-                if not self.tasks.get(task.title):
-                    self.tasks[task.title] = {
-                        # "affinities": []
+                    # Wake up task
+                    self.state.tasks[task.title] = self.state.tasks[task.title] | {
+                        "kind": task.kind,
+                        "task": task.task,
+                        "dependencies": task.dependencies,
+                        "ttl": task.ttl,
+                        "state": "awake",
+                        # affinities, a.k.a. "was seen called together with these tasks"
+                        # "affinities": list(
+                        #     set(
+                        #         self.state.tasks[task.title]["affinities"] +
+                        #         [
+                        #             sister_task.title
+                        #             for sister_task in tasks
+                        #             if task.title != sister_task.title
+                        #         ]
+                        #     )
+                        # ),
                     }
-                # self.tasks[task.title] = (
-                #     self.tasks[task.title] if self.tasks.get(task.title) else {
-                #         "affinities": [],
-                #         # "known_mistakes": ""
-                #     }
-                # )
 
-                # Wake up task
-                # TODO: signal with an asyncio.Queue so another loop can pick up all awake tasks efficiently
-                self.tasks[task.title] = self.tasks[task.title] | {
-                    "kind": task.kind,
-                    "task": task.task,
-                    "dependencies": task.dependencies,
-                    "ttl": task.ttl,
-                    "state": "awake",
-                    # affinities, a.k.a. "was seen called together with these tasks"
-                    # "affinities": list(
-                    #     set(
-                    #         self.tasks[task.title]["affinities"] +
-                    #         [
-                    #             sister_task.title
-                    #             for sister_task in tasks
-                    #             if task.title != sister_task.title
-                    #         ]
-                    #     )
-                    # ),
-                }
+                    if task.kind in ["complex", "root"]:
+                        # If task is complex, new tasks can come out of it, so we switch focus
+                        previous = self.state.parent
+                        log_internal_event(f"[RCS] Switching complex focus from [{previous}] to [{task}]")
+                        self.state.parent = task       # switch focus
 
-                if task.kind == "complex" or self.state.focus is None:
-                    previous = self.state.focus
-                    self.state.focus = task       # switch focus
-                task_payload = {
-                    "title": task.title,
-                    "task": task.task,
-                    # "trajectory_mistakes": self.tasks[task.title]["trajectory_mistakes"]
-                    # "known_mistakes": [
-                    #     # Known mistakes across the network are collected and presented as part of the immediate task bundle
-                    #     old_task["known_mistakes"]
-                    #     for old_title,old_task in self.tasks.items()
-                    #     if old_task.get("known_mistakes")
-                    # ]
-                }
-                # if task.kind != "simple":
-                #     # Only show task kind if not simple. Evidence found that if you tag "simple", the agent gets lazier
-                #     task_payload["kind"] = task.kind
+                    execution = await self.recurse(
+                        module=module,
+                        task=task,
+                        info=info,
+                    )
+                    if task.kind in ["complex", "root"]:
+                        # Restore focus to parent complex task
+                        log_internal_event(f"[RCS] Restoring complex focus from [{task}] to [{previous}]")
+                        self.state.parent = previous   # restore previous focus
 
-                # # Queue task
-                # if not self.events.get(task.title):
-                #     self.events[task.title] = asyncio.Event()
-                # await self.tasks_queue.put({"task": task, "info": info})
-                # # Wait for report
-                # await self.events[task.title].wait()
+                    # 5. Update report and put task to sleep
+                    log_internal_event(f"Putting [{task.title}] back to sleep and clearing discovered tools.")
+                    self.state.discovered_tools = []    # clear list of discovered tools
+                    self.state.tasks[task.title] = self.state.tasks[task.title] | {
+                        "state": "sleeping",
+                        "dependencies": task.dependencies,  # dependencies can update after execution
+                        "report": execution.final_result,
+                        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                        # "unexpected_transferable_lessons": execution.unexpected_transferable_lessons,
+                    }
 
-                execution = await self.recurse(
-                    module=module,
-                    # task=task.task,
-                    # task=json.dumps({"kind": task.kind, "task": task.task}),
-                    # task=task_payload,
-                    task=task,
-                    # task={"title": task.title, "task": task.task, "kind": task.kind},
-                    # Partial view of the tasks graph according to dependencies
-                    info=info,
-                )
-                if task.kind == "complex":
-                    self.state.focus = previous   # restore previous focus
+                    # Remember that this task was awakened for the current root problem
+                    self.awakened_list += [task.title]
 
-                # 4. Update report and put task to sleep
-                log_internal_event(f"Putting [{task.title}] back to sleep.")
-                self.tasks[task.title] = self.tasks[task.title] | {
-                    "state": "sleeping",
-                    "dependencies": task.dependencies,  # dependencies can update after execution
-                    "report": execution.final_result,
-                    "timestamp": datetime.datetime.now().isoformat(),
-                    # "ttl": task.ttl,
-                    "unexpected_transferable_lessons": execution.unexpected_transferable_lessons,
-                    # "best_known_trajectory": None,  # this is to be compiled with optimizers
-                    # "last_execution": None,
-                    # "volatility": None  # estimate volatility of this task, a.k.a. how often its state would change. Helps determine how long to keep in in cache.
-                }
-                # self.transferable_lessons += [execution.unexpected_transferable_lessons]
-                # 5. Update mistakes not to repeat
-                # if execution.trajectory_mistakes is not None:
-                #     if execution.trajectory_mistakes.lower() not in ["none", "null"]:
-                #         self.tasks[task.title]["known_mistakes"] += f"\n\n{execution.trajectory_mistakes}"
-
-                # Remember that this task was awakened
-                self.awakened_list += [task.title]
-
-            except (dspy.LMError, dspy.AdapterParseError) as e:
-                log_error(f"[AGENTS] [{task}] ERROR: {e}")
-                self.tasks[task.title] = self.tasks[task.title] | {"state": "failing"}
-                continue    # skip task update
+                except (dspy.LMError, dspy.AdapterParseError) as e:
+                    log_error(f"[AGENTS] [{task}] ERROR: {e}")
+                    self.state.tasks[task.title] = self.state.tasks[task.title] | {"state": "failing"}
+                    continue    # skip task update
+                
+        except Exception as e:
+            log_error(f"[AGENTS] Critical error: {e}")
+            raise e
 
         # Return reports in LLM-friendly format
         log_internal_event(f"Returning tasks: {tasks}")
         return [
-            {"title": task.title} | self.tasks[task.title]
+            {"title": task.title} | self.state.tasks[task.title]
             for task in tasks
         ]
 
@@ -408,11 +404,12 @@ class RCS(dspy.Module):
             log_payload = {"info": info, "task": task}
             log_internal_event(f"[RECURSE] {json.dumps(log_payload, indent=4, default=str)}")
 
+            self.state.current = task
             return await stream_dspy_program(
                 queues=[self.state.tokens],
                 module=module,
                 # task=task,
-                task={"title": task.title, "task": task.task},
+                task={"title": task.title, "task": task.task, "dependencies": task.dependencies},
                 info=info
             )
 
@@ -424,39 +421,18 @@ class RCS(dspy.Module):
                 await asyncio.sleep(3)
                 return await self.recurse(module=module, task=task, info=info, retries=retries-1)
             else:
-                # return dspy.Prediction(report=f"Agent failed to perform task: {e}")
                 raise e         # raise it to self.agents
-        # except dspy.utils.exceptions.ContextWindowExceededError as e:
-        #     return dspy.Prediction(report=f"Context window exceeded. Agent failed to perform task: {e}")
-
-    async def consume(self):
-        """a"""
-        # Wait on the SINGLE self.queue that contains task titles
-        # When a titles is caught, look at self.tasks to get info and build task payload
-        # Run stream_dspy_program on it
-        # Store results
-        while True:
-            # chunk = await self.state.tokens.get()
-            payload = await self.tasks_queue.get()
-            if payload is None:
-                # engine stops
-                break
-            
-            yield chunk
-
-
-    # async def verify(self):
-    #     """
-    #     Verify steps_taken against task, regardless of report.
-    #     """
 
     async def user(self, questions: list[str]):
         """
-        Here, the user will provide an answer.
-        Dispel any doubt when:
-            - in need of private or proprietary information.
-            - confirmation before making any change to the environment.
+        Escalate to the user for guidance when unable to fully complete the task.
         """
+        # out of options
+        # Escalate to the user for guidance when out of options.
+        # Dispel any doubt when:
+        #     - in need of private or proprietary information.
+        #     - confirmation before making any change to the environment.
+        # Here, the user will provide an answer.
         # Call this as a last resort when the agents are stuck.
         # Asking the right questions is the first step towards learning when you are stuck.
         # - environment-specific knowledge that the user might have, that would make things much simpler.
@@ -464,7 +440,7 @@ class RCS(dspy.Module):
             answers = []
             for question in questions:
                 # # 1. TBD: Use decision model to find if answer is in dataset
-                self.state.situation = {"type": "question", "parent": self.state.focus.title, "question": question}
+                self.state.situation = {"type": "question", "parent": self.state.current.title, "question": question}
                 log_internal_event(f"[SITUATION] {self.state.situation}")
                 await self.state.event.wait()
                 self.state.situation = {}      # clear situation so backend knows
@@ -476,10 +452,14 @@ class RCS(dspy.Module):
                 # print(question)
                 # answer = input("Answer > ")
 
-                log_internal_event("Updating QnA dataset.")
-                # self.qna += [dspy.Example(question=question, answer=answer)]
-                self.qna[question] = dspy.Example(question=question, answer=answer)
-                log_internal_event(f"{json.dumps([data.question for question, data in self.qna.items()], indent=4)}")
+                # log_internal_event(f"[RCS] Updating QnA dataset.")
+                # self.state.qna += [dspy.Example(question=question, answer=answer)]
+                # self.state.qna[question] = dspy.Example(question=question, answer=answer)
+                self.state.qna[question] = {"kind": self.state.current.kind, "content": answer}
+                log_internal_event(f"[RCS] {self.state.qna}")
+                # log_internal_event(f"[RCS] [{question}] -> [{self.state.qna[question]}]")
+                # log_internal_event(f"{json.dumps([data.question for question, data in self.state.qna.items()], indent=4)}")
+                # log_internal_event(f"{json.dumps([data.question for question,answer in self.state.qna.items()], indent=4)}")
                 # print("#########################################")
                 answers += [{"question": question, "answer": answer}]
             log_internal_event(f"Answers: {answers}")
@@ -488,36 +468,36 @@ class RCS(dspy.Module):
             raise e
         return answers
 
-    async def memory(self, title: str):
-        """Get a report from a cached task, by task title."""
-        available_tasks = [
-            key for key,value in self.tasks.items()
-            if value.get("report")
-        ]
-        return (
-            await self.agents(
-                tasks=[Task(
-                    title=title,
-                    task=self.tasks[title]["task"],
-                    kind=self.tasks[title]["kind"],
-                    ttl=self.tasks[title]["ttl"],
-                    dependencies=self.tasks[title]["dependencies"]
-                )]
-            )
-            if title in available_tasks
-            else f"Task title: {title} - does not exist. Available tasks: {available_tasks}"
-        )
+    # async def memory(self, title: str):
+    #     """Get a report from a cached task, by task title."""
+    #     available_tasks = [
+    #         key for key,value in self.state.tasks.items()
+    #         if value.get("report")
+    #     ]
+    #     return (
+    #         await self.agents(
+    #             tasks=[Task(
+    #                 title=title,
+    #                 task=self.state.tasks[title]["task"],
+    #                 kind=self.state.tasks[title]["kind"],
+    #                 ttl=self.state.tasks[title]["ttl"],
+    #                 dependencies=self.state.tasks[title]["dependencies"]
+    #             )]
+    #         )
+    #         if title in available_tasks
+    #         else f"Task title: {title} - does not exist. Available tasks: {available_tasks}"
+    #     )
 
     def is_task_expired(self, title: str):
         """Tell if a task is expired"""
-        if self.tasks.get(title) and self.tasks[title].get("report"):
+        if self.state.tasks.get(title) and self.state.tasks[title].get("report"):
             # Determine expiration time of cached report
             expiration_time = (
-                datetime.datetime.fromisoformat(self.tasks[title]["timestamp"]) +
-                datetime.timedelta(minutes=self.tasks[title]["ttl"])
+                datetime.datetime.fromisoformat(self.state.tasks[title]["timestamp"]) +
+                datetime.timedelta(minutes=self.state.tasks[title]["ttl"])
             )
             # If current date is not yet past expiration time, cache is valid and report generation is skipped for this turn
-            if datetime.datetime.now() <= expiration_time:
+            if datetime.datetime.now(datetime.UTC) <= expiration_time:
                 log_internal_event(f"[AGENTS] Cached [{title}] within TTL")
                 return False
             else:

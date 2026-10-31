@@ -15,7 +15,10 @@ class Task:
     """A payload containing a task and its dependencies"""
     title: str = field(metadata={"description": "Title of the task. Must include the name of the entities involved, to avoid ambiguities with other, similar tasks applied to other entities."})
     task: str
-    kind: str = field(metadata={"description": "The kind of task between: simple, complex. Use simple when the task may not be broken down any further."})
+    # kind: str = field(metadata={"description": "The kind of task between: simple, complex. Use simple when the task may not be broken down any further."})
+    # kind: str = field(metadata={"description": "The kind of task between: simple, complex. Use simple when the task never breaks down into more tasks."})
+    # kind: str = field(metadata={"description": "The kind of task between: simple, complex. Use simple if the task could be done in just a few steps."})
+    kind: str = field(metadata={"description": "The kind of task. Only kind 'simple' is allowed."})
     ttl: int = field(metadata={"description": "How long a report from this task should be considered valid, in minutes."})
     # volatility: str = field(metadata={"description": "How often the results of the task may change in the future, between: low, medium, high"})
     # domain: str = field(metadata={"description": "Where the task can be performed between: browser, shell, ide"})
@@ -31,8 +34,11 @@ class State:
     """The state of an Optimus instance"""
     filepath: str   # where to persist memory
     tasks: list[Task]
-    focus: str  # the parent task at hand
-    # candidate: list[Task]
+    qna: dict
+    parent: str  # the parent task
+    current: str # the current task
+    discovered_tools: list[str] # used to track discovered tools in a context
+    approval: bool      # whether to ask for tool and agents approval
     situation: dict
     resolution: str
     event: asyncio.Event
