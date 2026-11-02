@@ -39,6 +39,7 @@ class State:
     current: str # the current task
     discovered_tools: list[str] # used to track discovered tools in a context
     approval: bool      # whether to ask for tool and agents approval
+    justification: str  # the current justification for the situation
     situation: dict
     resolution: str
     event: asyncio.Event
@@ -134,9 +135,10 @@ def require_approval(state: State, func, name):
     async def wrapped(**kwargs):
         state.situation = {
             "type": "tool-approval",
-            "parent": state.focus.title,
+            "parent": state.current.title,
             "tool": name,
-            "args": kwargs
+            "args": kwargs,
+            "justification": state.justification
         }
         log_internal_event(f"[SITUATION] {state.situation}")
         await state.event.wait()

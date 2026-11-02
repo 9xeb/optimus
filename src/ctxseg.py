@@ -125,22 +125,36 @@ class RCS(dspy.Module):
         # )
 
         self.awakened_list = []
+        previous_task = None
         while task:
             log_internal_event(f"[RCS] Calling agent for [{task}]")
             log_error(f"[RCS] Available tasks: {list(self.state.tasks.keys())}")
             if task in list(self.state.tasks.keys()):
+                log_internal_event(f"[RCS] Picking known task: [{task}].")
                 # Reuse task if present (can be non-root too)
                 task_payload = Task(
                     title=task,
                     task=self.state.tasks[task]["task"],
                     kind=self.state.tasks[task]["kind"],
-                    dependencies=self.state.tasks[task]["dependencies"],
+                    # only reuse dependencies that are not expired
+                    dependencies=[
+                        dependency
+                        for dependency in self.state.tasks[task]["dependencies"]
+                        if not self.is_task_expired(dependency)
+                    ],
                     ttl=self.state.tasks[task]["ttl"]
                 )
             else:
                 # Create a new root task for unseen problem
-                log_error(f"[RCS] Creating a new root task.")
-                task_payload = Task(title=task, task=task, kind="root", dependencies=[], ttl=60)
+                log_error(f"[RCS] Growing new root task: [{task}]")
+                task_payload = Task(
+                    title=task,
+                    task=task,
+                    kind="root",
+                    # attach to previous root task to enable pivoting
+                    dependencies=[] if previous_task is None else [previous_task],
+                    ttl=60
+                )
                 self.state.parent = task_payload
 
             exploration = await self.agents(
@@ -158,6 +172,7 @@ class RCS(dspy.Module):
             log_internal_event(f"[SITUATION] {self.state.situation}")
             await self.state.event.wait()
             self.state.situation = {}      # clear situation so backend knows
+            previous_task = task
             task = self.state.resolution
             self.state.event.clear()
 
@@ -173,7 +188,7 @@ class RCS(dspy.Module):
     async def agents(self, tasks: list[Task]):
         """
         Run the most conservative minimal immediate best next sub-tasks architecture, given what is known so far.
-        If presented with partial information, run an equally partial architecture, since you can always run another one when more info arrives.
+        If presented with partial information, run an equally partial architecture, since you can always run the next when more info arrives.
 
         Example call:
             next_tool_args = {"tasks": [{"title": "...", "task": "...", "kind": "...", "dependencies": []}]}

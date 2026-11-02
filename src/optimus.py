@@ -52,6 +52,7 @@ class Optimus():
             current=None,           # RCS internal state management, used for memory management
             discovered_tools=[],    # RCS manages when switching contexts
             approval=approval,      # RCS can ask for tool call and agents approval
+            justification=None,     # RCS produces, Backend consumes (related to situation)
             situation={},           # RCS produces, Backend consumes
             resolution=None,
             event=asyncio.Event(),  # RCS and Backend signal each other
@@ -149,6 +150,7 @@ class Optimus():
                     @dataclass
                     class ToolCall:
                         """Tool call payload"""
+                        justification: str
                         name: str
                         args: dict
                     async def run_tools(calls: list[ToolCall]):
@@ -169,9 +171,10 @@ class Optimus():
                                     if all([arg in list(match[0].args.keys()) for arg in list(call.args.keys())]):
                                         # Run the first tool that matches name
                                         # Await so it works both for async (with approval) and sync (no approval)
+                                        self.state.justification = call.justification  # register the justification to call this tool
                                         tool_output = await match[0].acall(**call.args)
                                         log_internal_event(f"[OPTIMUS] Tool {call.name} output: {tool_output}")
-                                        log_error(f"[OPTIMUS] discovered tools: {self.state.discovered_tools}")
+                                        # log_error(f"[OPTIMUS] discovered tools: {self.state.discovered_tools}")
                                         if call.name in self.state.discovered_tools:
                                             log_internal_event(f"[OPTIMUS] Tool already discovered: {call.name}. Skipping piggybacking.")
                                             # return tool_output

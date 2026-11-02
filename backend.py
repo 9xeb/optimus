@@ -8,10 +8,7 @@
 # - User manual: rule of thumb: approve anything that makes sense and seems related to the task and is not destructive. No need to deep dive into what the agent is doing, that's the point of having an agent
 # - implement tool output scrolling, sort of mini-RLM
 
-# 1. fix name preview being cut under the node;
-# 2. implement pick: trigger non-root tasks directly via API and UI;
 # 3. implement cron: repeat non-root tasks at scheduled intervals;
-# 4. simple background stream of what comes out of /tasks/stream
 # 5. full TUI version of this, callable in a terminal (by providing the backend URL as argument);
 # 6. allow reviewing QnA if anything changes
 # 7. Vibe code a white collar MCP sandbox with file management, notes, email, calendar, logs in to google/microsoft suites, handles secrets and credentials via agent (it's local anyway)
