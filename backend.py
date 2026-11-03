@@ -68,6 +68,9 @@ class TaskPayload():
     """Valid payload for POST requests at /tasks"""
     task: str
 
+@app.get("/health")  
+async def health():  
+    return {"status": "ok"}
 
 @app.post("/tasks")
 async def create_task(task: TaskPayload):
