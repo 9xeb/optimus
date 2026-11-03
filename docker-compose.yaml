@@ -1,25 +1,32 @@
 services:
-  # harness:
-  #   # profile: ["harness"]
-  #   build: .
-  #   environment:
-  #     OPENAI_API_BASE: http://127.0.0.1:8080/v1
-  #     OPENAI_API_KEY: 1234
-  #     OPENAI_API_MODEL: openai/local
-  #     MCP_CONFIG: "/home/optimus/mcp_config.json"
-  #   network_mode: "host"
+  optimus:
+    build: .
+    command: --approval
+    environment:
+    - OPENAI_API_BASE=${OPENAI_API_BASE:-http://127.0.0.1:8081/v1}
+    - OPENAI_API_KEY=${OPENAI_API_KEY:-1234}
+    - OPENAI_API_MODEL=${OPENAI_API_MODEL:-openai/my/local/model}
+    - MCP_GATEWAY=${MCP_GATEWAY:-http://127.0.0.1:8080/mcp}
+    # MLFLOW_API_BASE=${MLFLOW_API_BASE}
+    ports:
+      - 8000:8000
+    network_mode: host
+    volumes:
+     - optimus-data:/home/optimus/data
   runner:
-    # profiles: ["runner"]
-    image: ghcr.io/ggml-org/llama.cpp:server-b10454
+    # image: ghcr.io/ggml-org/llama.cpp:server-b10454
+    image: ghcr.io/ggml-org/llama.cpp:server-b11977
     command: --no-mmproj
     environment:
       # GGML_VK_DISABLE_F16: 1  # workaround to avoid gibberish output on Intel iGPUs (https://github.com/ggml-org/llama.cpp/issues/17106)
       LLAMA_ARG_HOST: 0.0.0.0
       LLAMA_ARG_HF_REPO: unsloth/gemma-4-E4B-it-qat-GGUF:UD-Q4_K_XL
+      # LLAMA_ARG_HF_REPO: unsloth/NVIDIA-Nemotron-3.5-Bolt-E4B-GGUF:UD-Q4_K_XL
       LLAMA_ARG_BATCH: 512
+      # LLAMA_ARG_N_GPU_LAYERS: 0
       LLAMA_ARG_THREADS: 4
-      # LLAMA_ARG_CACHE_TYPE_K: q8_0 
-      # LLAMA_ARG_CACHE_TYPE_v: q8_0
+      LLAMA_ARG_CACHE_TYPE_K: q8_0 
+      LLAMA_ARG_CACHE_TYPE_v: q8_0
       LLAMA_ARG_FLASH_ATTN: on
       LLAMA_ARG_CTX_SIZE: 32768
       LLAMA_ARG_SPEC_TYPE: draft-mtp
@@ -38,7 +45,7 @@ services:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/v1/health"]
       interval: 30s
       timeout: 10s
-      retries: 3      # increase retries if first download of LLM is very slow
+      retries: 3
   sandbox:
     build:
       context: .
@@ -49,6 +56,7 @@ services:
     volumes:
       - sandbox-data:/home/gem/workspace
       - sandbox-kube:/home/gem/.kube
+      # Add custom mounts here...
     extra_hosts:
       - "host.docker.internal:host-gateway" # allows access to host's localhost via host.docker.internal
     restart: "unless-stopped"
@@ -58,33 +66,35 @@ services:
       PROXY_SERVER: ${PROXY_SERVER:-}
       WORKSPACE: ${WORKSPACE:-/home/gem/workspace}
       TZ: ${TZ:-Europe/Berlin}
-  mlflow:
-    image: ghcr.io/mlflow/mlflow:v3.15.2-full
-    ports:  
-      - "5000:5000"  
-    volumes:  
-      - mlflow-data:/mlflow  
-    # environment:  
-    #   MLFLOW_BACKEND_STORE_URI: sqlite:////mlflow/mlflow.db  
-    #   MLFLOW_DEFAULT_ARTIFACT_ROOT: /mlflow/artifacts  
-    command: >  
-      mlflow server  
-      --backend-store-uri sqlite:////mlflow/mlflow.db  
-      --default-artifact-root /mlflow/artifacts  
-      --host 0.0.0.0
-    networks:
-      - optimus
-    healthcheck:  
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]  
-      interval: 10s  
-      timeout: 5s  
-      retries: 30  
+  # mlflow:
+  #   image: ghcr.io/mlflow/mlflow:v3.15.2-full
+  #   ports:  
+  #     - "5000:5000"  
+  #   volumes:  
+  #     - mlflow-data:/mlflow  
+  #   # environment:  
+  #   #   MLFLOW_BACKEND_STORE_URI: sqlite:////mlflow/mlflow.db  
+  #   #   MLFLOW_DEFAULT_ARTIFACT_ROOT: /mlflow/artifacts  
+  #   command: >  
+  #     mlflow server  
+  #     --backend-store-uri sqlite:////mlflow/mlflow.db  
+  #     --default-artifact-root /mlflow/artifacts  
+  #     --host 0.0.0.0
+  #   networks:
+  #     - optimus
+  #   healthcheck:  
+  #     test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]  
+  #     interval: 10s  
+  #     timeout: 5s  
+  #     retries: 30
 
 volumes:
+  optimus-data:
   hf-cache:
+  # mlflow-data:
   sandbox-data:
   sandbox-kube:
-  mlflow-data:
+  # Add custom sandbox volumes here...
 
 networks:
   optimus:
