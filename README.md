@@ -1,5 +1,5 @@
 # Optimus - The science of Agentic Engineering
-Optimus is an AI agents platform that works with users to solve their problems. Some strong design choices were made to make Optimus an actual machine, meant to be owned and operated by accountable real users, with an option to run fully autonomously in low-risk scenarios.
+Optimus is an easy to use AI agents platform that works with users to solve their problems. Some strong design choices were made to make Optimus an actual machine, meant to be owned and operated by accountable real users, with an option to run fully autonomously in low-risk scenarios.
 
 It features:
 1. **Dynamic multi-agent architectures** with minimal assumptions. Forget hard-coded sub-agents, esoteric skills and "trust me, bro" prompts. Users and LLMs co-design agent architectures from scratch as their problems are being solved.
@@ -88,11 +88,35 @@ Keeping context size minimal makes AI Agents faster, cheaper and smarter. Since 
 ### DeepSeek V4.1 Flash - Deep research with frontier models
 
 ## Future additions
-- implement memory oblivion logic for `examples`;
+- visible context memory pressure before pivoting
+- memory oblivion logic for `examples`;
 - cronjobs;
 - user sessions in backend and frontend
+- openai compatible API as main optimus interface
+- chat gateways (telegram, slack, discord, teams, gmeet)
 - better minimum viable MCP sandbox (browser, terminal, files folder and chat gateways), MVMS.
-- integrate decision models (DeAct?)
+- decision models (DeAct?)
+<!-- 
+# TODO:
+# - improve the visibility of reports inside the node. How about popping the report up when hovering over the node, while allowing to scroll it if it's long?
+# - improve user experience in UI,
+# - review and simplify and secure frontend,
+# - desktop/mobile app
+# - minimalistic input interface (less clicking, more typing). Single input box, greyed out when no situations or any task is awake (meaning the engine is busy doing something). Emergency button to stop all tasks and go full sleep.
+# - try different inspiring visual flavors: network of neurons, galaxy of stars, ...
+
+# - User manual: rule of thumb: approve anything that makes sense and seems related to the task and is not destructive. No need to deep dive into what the agent is doing, that's the point of having an agent
+# - implement tool output scrolling, sort of mini-RLM
+
+# 3. implement cron: repeat non-root tasks at scheduled intervals;
+# 5. full TUI version of this, callable in a terminal (by providing the backend URL as argument);
+# 6. allow reviewing QnA if anything changes
+# 7. Vibe code a white collar MCP sandbox with file management, notes, email, calendar, logs in to google/microsoft suites, handles secrets and credentials via agent (it's local anyway)
+# 8. backend multiplexing when two UIs are open and consume the same queue of tokens;
+# 9. implement fzf-like search
+# 10. make a truly air-gapped frontend (no CDN for js)
+# 11. develop a minimum viable mcp sandbox with: browser, terminal and a fileshare folder (where human and optimus can share files)
+ -->
 
 
 # How Optimus came to be
