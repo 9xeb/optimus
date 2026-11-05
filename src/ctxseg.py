@@ -192,9 +192,9 @@ class RCS(dspy.Module):
                 }]
 
             # After sanity checks, register current tasks as dependencies of parent task
-            log_internal_event(f"[RCS] Connecting dependencies for [{self.state.parent.title}]")
             for task in tasks:
                 if task.kind != "root" and self.state.parent is not None:
+                    log_internal_event(f"[RCS] Connecting dependencies for [{self.state.parent.title}]")
                     # NOTE: the order of execution in dependencies list matters. That's how they came out of the LLM.
                     if task.title not in self.state.parent.dependencies:
                         # This is what makes future calls to this task cheaper: instead of going through reasoning again, reports are requested by network design.
@@ -284,17 +284,19 @@ class RCS(dspy.Module):
                         "state": "sleeping",
                         "dependencies": task.dependencies,  # dependencies may update after execution
                         "report": execution.final_result,
-                        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
                     }
+                    if self.is_task_expired(task.title):
+                        # Update timestamp if cache expired
+                        self.state.tasks[task.title]["timestamp"] = datetime.datetime.now(datetime.UTC).isoformat()
 
                     # Update working memory index
-                    self.awakened_list += [task.title]                        
+                    self.awakened_list += [task.title]
 
                 except (dspy.LMError, dspy.AdapterParseError) as e:
                     log_error(f"[AGENTS] [{task}] ERROR: {e}")
                     self.state.tasks[task.title] = self.state.tasks[task.title] | {"state": "failing"}
                     continue    # skip task update
-                
+
         except Exception as e:
             log_error(f"[AGENTS] Critical error: {e}")
             raise e
