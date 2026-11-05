@@ -10,7 +10,7 @@ Optimus aims to be deployable in the cloud and on edge devices, with wide applic
 
 Powered by [LLMs](https://github.com/ggml-org/llama.cpp) and [DSPy](https://github.com/stanfordnlp/dspy). Does not stand in the way of search and compute.
 
-# QUICK DEMO HERE
+<!-- # QUICK DEMO HERE -->
 
 # Installation
 Optimus comes with a **Docker Compose** stack that deploys a **Gemma-4 E4B model on CPU** by default, an **agent sandbox** with terminal and browser tools, and the **optimus backend and frontend app**. 8GB of RAM is enough for the entire stack to run.
@@ -92,7 +92,7 @@ Keeping context size minimal makes AI Agents faster, cheaper and smarter. Since 
 - memory oblivion logic for `examples`;
 - cronjobs;
 - user sessions in backend and frontend
-- openai compatible API as main optimus interface
+- openai compatible API as main optimus interface (this unlocks mobile apps)
 - chat gateways (telegram, slack, discord, teams, gmeet)
 - better minimum viable MCP sandbox (browser, terminal, files folder and chat gateways), MVMS.
 - decision models (DeAct?)
