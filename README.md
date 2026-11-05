@@ -1,26 +1,30 @@
 # Optimus - The science of Agentic Engineering
-Optimus is a **recursive agent architecture** that accelerates continuous, evidence-driven optimizations of agentic instructions to solve problems, **fully locally** on CPUs within **reasonable timeframes**. 
+Optimus is an AI agents platform that works with users to solve their problems. Some strong design choices were made to make Optimus an actual machine, meant to be owned and operated by accountable real users, with an option to run fully autonomously in low-risk scenarios.
 
-Humans own the problems, and provide authoritative insight. Optimus drills problems, asks questions when stuck, and curates a searchable knowledge base aligned with the humans it reports to.
+It features:
+1. **Dynamic multi-agent architectures** with minimal assumptions. Forget hard-coded sub-agents, esoteric skills and "trust me, bro" prompts. Users and LLMs co-design agent architectures from scratch as their problems are being solved.
+2. A **powerful problem solving engine** to expand the horizon of tasks solvable by cheaper LLMs, based on [this research on context segmentation](https://arxiv.org/abs/2609.12839).
+3. A **robust agent harness** with feedback to allow even the weakest agent-ready LLM to recover from and capitalize on small mistakes, shifting user priorities, and unexpected situations.
 
-Optimus is made of two core components:
-1. A robust, advancing-branching-escalating recursive problem solving engine with memory;
-2. **(to be implemented)** A background self-learning and optimization loop.
-
-As the problem solving engine works, it builds up a dataset of reasoning traces and Q&A pairs that can be later used by DSPy optimizers and other similar components.
-
-Key features:
-- works with small, **few billion parameters LLMs** on consumer hardware and **CPUs** (about 4GB of RAM);
-- brings recursion to [context segmentation](https://arxiv.org/abs/2609.12839);
-- wires into your environment via **MCP** server.
+Optimus aims to be deployable in the cloud and on edge devices, with wide applications ranging from daily white-collar co-workers to industrial robots.
 
 Powered by [LLMs](https://github.com/ggml-org/llama.cpp) and [DSPy](https://github.com/stanfordnlp/dspy). Does not stand in the way of search and compute.
 
-## Quickstart
-First, spin up the fully local agentic stack ([llama.cpp](https://github.com/ggml-org/llama.cpp) + [AIO agent sandbox](https://github.com/agent-infra/sandbox) + [mlflow](https://github.com/mlflow/mlflow)):
+# QUICK DEMO HERE
+
+# Installation
+Optimus comes with a **Docker Compose** stack that deploys a **Gemma-4 E4B model on CPU** by default, an **agent sandbox** with terminal and browser tools, and the **optimus backend and frontend app**. 8GB of RAM is enough for the entire stack to run.
+
+Alternatively, you can skip Docker and configure Optimus in your Python environment, but you must provide your own OpenAI compatible API and MCP server.
+
+### With Docker
+Spin up the entire local agentic stack ([llama.cpp](https://github.com/ggml-org/llama.cpp), [AIO agent sandbox](https://github.com/agent-infra/sandbox), optimus), or edit the env vars in the `optimus` service to point to a different OpenAI compatible provider, and MCP gateway.
 ```bash
-docker compose up -d
+docker compose up -d optimus sandbox runner
 ```
+Start working with Optimus at `http://127.0.0.1:8000`.
+
+### Python only
 Install Optimus:
 ```bash
 # Requires Python > 3.12
@@ -33,66 +37,80 @@ Point to your favorite (local) endpoints:
 export OPENAI_API_BASE=http://127.0.0.1:8081/v1
 export OPENAI_API_KEY=1234
 export OPENAI_API_MODEL=openai/my/local/model
-export MLFLOW_API_BASE=http://127.0.0.1:5000
 export MCP_GATEWAY=http://127.0.0.1:8080/mcp
 ```
-Try out the CLI:
+Try out the web app:
 ```bash
-python3 cli.py
+python3 backend.py --file tasks.json --approval
 ```
-Send a problem to Optimus and it will start drilling. Optimus will reach out to you when it either feels stuck or belives that a solution was found. With time, as its internal knowledge base evolves, Optimus will outgrow the base model it runs on and get better at doing what you expect it to do.
 
-Take a look at Optimus working live at `http://127.0.0.1:8080`.
+# How the harness works
+Optimus is a **ReAct loop spawning graphs of ReAct loops**. It splits the main task into sub-tasks, solves them, observes the results and decides if either new sub-tasks are due or the main task is complete. Each sub-task is tackled by a separate ReAct agent, carrying the benefits explained in [this paper](https://arxiv.org/abs/2609.12839). For the duration of the same main task, agents share their findings in a common `working memory`. This core engine is mostly invisible to the user, to both avoid getting in the way of the extraordinary search and compute capabilities of AI Agents, and to keep the user focused on its own problems.
 
-## How it works
-Suppose your AI agent achieved the intended goal with no mistakes and no hiccups, then look just one step back. All your AGENT.md, MEMORY.md, skills, tool signatures, RAG knowledge, chat messages were merged into a single, final prompt. That prompt got the job done, but your harness is now a mess that binds you to proprietary frontier model providers.
 
-What if you could instead start from scratch, with minimal assumptions, and rely on a continuous, evidence-driven prompt search algorithm, that learned directly from you and the environment on which it is supposed to be deployed, with no additional structural overhead or rigid assumptions on what the the agentic architecture will look like? You would own the problems and help validate the outcomes, then you would let search and compute do its job automatically. Enter Optimus.
+An Optimus agent, at any point, stops and asks for the user's intervention when either:
+1. a **non-readonly action** is about to be performed;
+2. it is lost and **unable to complete** its task;
+3. it thinks the **main task is done**.
 
-At the heart of Optimus' problem solving engine lies a recursive DSPy module that runs ReAct agents capable of branching themselves. Each branch is a self-contained, recursive [segmented context](https://arxiv.org/abs/2609.12839) that has the following properties:
-- it is a fully functional ReAct agent;
-- can `escalate` questions to a human when stuck;
-- can split a complex situation into multiple contexts via `branch`;
-- can `advance` on a direct operation with MCP access.
+In each of these cases, users must provide feedback in human language to steer the agents towards the right path.
 
-This improves the separation of high level planning from low level execution described in the [paper](https://arxiv.org/abs/2609.12839) by making it recursive and much more robust.
+Each of the three cases above ensure that, respectively:
+1. users are accountable for potentially destructive actions;
+2. users can fill knowledge gaps that the agents are displaying;
+3. users can amend, shift priorities, change their minds and follow up with new ideas.
+> [!TIP]
+> Point (2.) is especially relevant when working with weaker LLMs.
 
-Here is an overview of the problem solving engine:
+Every time the user provides feedback, Optimus stores it in a persistent list of `examples`, shared across all ReAct loops.
+
+Here is an overview of the engine:
 ```mermaid
 graph TD
-    Human -- send task --> Optimus
-    Optimus -- branch --> Optimus
-    Optimus -- escalate --> Human
-    Optimus -- prompt --> ReAct+MCP
-    ReAct+MCP -- report --> Optimus
+    User -- feed --> Optimus
+    Optimus -- ReAct --> Optimus
+    Optimus -- escalate --> User
+    Optimus -- report --> User
+    Optimus -- prompt --> Agent+MCP
+    Agent+MCP -- ReAct --> Agent+MCP
+    Agent+MCP -- report --> Optimus
+    Agent+MCP -- escalate --> User
 ```
-<!-- Optimus -- traces -- Memory -->
 
-### How Agentic Prompt Engineering Works (to be implemented)
-It starts with nothing but a given objective and an optional prompt draft to start from.
+## Tools
+Keeping context size minimal makes AI Agents faster, cheaper and smarter. Since tools are one of the major sources of context bloat in AI Agents, Optimus features:
+- **context segmentation** so that, for example, an agent scrolling documentation in a browser only shares the final results of its research with a second agent writing code on a terminal;
+- robust **dynamic tool discovery**, hiding any number of verbose and irrelevant tool descriptions behind a `list_tools`, `describe_tools` and `run_tools` triplet for all ReAct loops;
+- in particular, `run_tools` accepts a list of tools, allowing agents to perform multiple actions within a single reasoning step.
 
-It first **runs** the draft (just pure language or optionally with an Agent on your MCP environment), framing the user message as **Objective**.
+## See it in action
+### Gemma-4 E4B - cluster-wide K8s troubleshooting with small local models on CPU
+### DeepSeek V4.1 Flash - Deep research with frontier models
 
-Then it **criticizes** the Agent's execution path against the **Objective** and an **Example**, and it **fixes** the prompt draft before running the Agent again.
+## Future additions
+- implement memory oblivion logic for `examples`;
+- cronjobs;
+- user sessions in backend and frontend
+- better minimum viable MCP sandbox (browser, terminal, files folder and chat gateways), MVMS.
+- integrate decision models (DeAct?)
 
-In the meantime, GEPA keeps an **evolutionary pool** of least criticized prompts.
-This form of automated prompt engineering stops and comes back to the human when it either reaches a **plateau** in the optimization or it believes to have found a prompt that yielded a **perfect** execution path.
 
-### The role of humans in agentic prompt engineering (to be implemented)
-Instead of validating every single output, humans write a set of rules for the machine to self-evaluate against. For example, see [Constitutional AI](https://arxiv.org/abs/2212.08073).
+# How Optimus came to be
+Motivated by the possibility of realizing the main contributor's childhood dream of having thinking machines making lives easier and happier for humans, and not the other way around, I have been experimenting with SLMs on cheap hardware for more than three years. Optimus is the last iteration, after a long list of previously failed and dropped attempts to make local artificially intelligent agents useful.
+
+## The intuition
+Suppose your AI agent achieved the intended goal with no mistakes and no hiccups, then look just one step back. All your AGENT.md, MEMORY.md, skills, tool signatures, RAG knowledge, chat messages were mixed into a single, final prompt. That prompt got the job done, but your harness is now a bloated mess that binds you to expensive and ever scarier proprietary frontier model providers.
+
+What if you could instead start from scratch, with minimal assumptions, decent hardware and an ok LLM, and rely on a continuous, evidence-driven prompt search algorithm, that learned directly from you and the environment on which it is supposed to be deployed, with no additional structural overhead or rigid assumptions on what the agentic architecture will look like? You would own the machine, the problems, the outcomes, and let automated search and compute do what it does best. Enter Optimus.
 
 ## Why it works
-Instead of manually chasing outcomes, Optimus focuses on applying a scientific method to explore the prompts that might generate those outcomes. Anything that the LLM can infer at runtime is left to be inferred at runtime.
+Instead of manually chasing outcomes, Optimus focuses on applying a scientific method to explore the prompts that might generate those outcomes, collaborating with the user on corner cases. Anything that the LLM can infer at runtime is left to be inferred at runtime.
 
 ## From Conversations to Prototyping
-We are used to chatting with AI. On one side, conversations and prompt engineering with LLMs can become exhausting for humans when faced with complex tasks. The gap between what you want to say and how you should say it can get frustrating. On the other side, computers require O(n) RAM as conversations grow, and this can become a dealbreaker when deploying locally.
+We are used to chatting with AI. On one side, conversations and prompt engineering with LLMs can become exhausting for humans when faced with complex tasks. The gap between what you want to say and how you should say it can get frustrating. On the other side, computers require linearly more RAM as conversations grow, and this can quickly become a dealbreaker when deploying locally.
 
-Optimus replaces long conversations with machine accelerated prototyping. Humans are called when Agents are lost, not the other way around. Humans are also required to approve dangerous tool calls. This means that when you see Optimus working for ~15 minutes and generating 9k tokens worth of experiments before giving you a single answer, you should remember that it has probably just spared you tens of thousands of tokens of tedious conversations and manual engineering.
+Optimus replaces long conversations with machine accelerated prototyping. Humans are called when Agents are lost, not the other way around. Humans are also required to approve dangerous actions. This means that when you see Optimus humming for ~15 minutes before coming back to you, you should remember that it has probably just spared you tens of thousands of tokens of tedious conversations and manual engineering.
 
 Optimus differs from a typical conversational interface for a few reasons:
- - effort is shifted away from the user and towards the LLM.
- - conversational context size builds up more slowly thanks to context segmentation. LLMs degradation due to context bloat is mitigated.
- <!-- - prompts are tested and scored in your (repeatable, test) environment before you receive an actual response. -->
-
-<!-- ### Known errors
-`unhandled errors in a TaskGroup (1 sub-exception)` -> sandbox is not running or MCP server is not working. -->
+- effort is shifted away from the user and towards the LLM;
+- conversational context size builds up more slowly thanks to context segmentation. LLM degradation due to context bloat is mitigated.
