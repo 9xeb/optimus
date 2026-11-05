@@ -1,4 +1,4 @@
-# Optimus - The science of Agentic Engineering
+# Optimus - Agentic Engineering for All
 Optimus is an easy to use AI agents platform that works with users to solve their problems. Some strong design choices were made to make Optimus an actual machine, meant to be owned and operated by accountable real users, with an option to run fully autonomously in low-risk scenarios.
 
 It features:
@@ -6,7 +6,7 @@ It features:
 2. A **powerful problem solving engine** to expand the horizon of tasks solvable by cheaper LLMs, based on [this research on context segmentation](https://arxiv.org/abs/2609.12839).
 3. A **robust agent harness** with feedback to allow even the weakest agent-ready LLM to recover from and capitalize on small mistakes, shifting user priorities, and unexpected situations.
 
-Optimus aims to be deployable in the cloud and on edge devices, with wide applications ranging from daily white-collar co-workers to industrial robots.
+Optimus aims to be deployable in the cloud and on edge devices, with wide applications ranging from daily white-collar co-workers to industrial robots, given the right MCP tools.
 
 Powered by [LLMs](https://github.com/ggml-org/llama.cpp) and [DSPy](https://github.com/stanfordnlp/dspy). Does not stand in the way of search and compute.
 
