@@ -3,7 +3,7 @@ services:
     build: .
     command: --approval
     environment:
-    - OPENAI_API_BASE=${OPENAI_API_BASE:-http://127.0.0.1:8081/v1}
+    - OPENAI_API_BASE=${OPENAI_API_BASE:-http://127.0.0.1:9931/v1}
     - OPENAI_API_KEY=${OPENAI_API_KEY:-1234}
     - OPENAI_API_MODEL=${OPENAI_API_MODEL:-openai/my/local/model}
     - MCP_GATEWAY=${MCP_GATEWAY:-http://127.0.0.1:8080/mcp}
@@ -35,7 +35,7 @@ services:
       # LLAMA_ARG_N_CPU_MOE: 18
       LLAMA_ARG_REASONING: off  # on|off|auto
     ports:
-      - 127.0.0.1:8081:8080
+      - 127.0.0.1:9931:9931
     volumes:
       - hf-cache:/root/.cache/huggingface
     restart: unless-stopped
