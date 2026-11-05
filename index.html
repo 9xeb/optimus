@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Optigraph Console</title>
+<title>Optimus Console</title>
 <style>
   :root {
     --bg: #070b12; --bg-2: #0a0f18; --panel: #0e1522; --panel-2: #131c2c;
@@ -21,21 +21,28 @@
   html, body { margin: 0; height: 100%; }
   body { background: radial-gradient(1200px 700px at 78% -10%, rgba(53,208,255,.10), transparent 60%), radial-gradient(900px 600px at -5% 105%, rgba(167,139,250,.08), transparent 55%), var(--bg); color: var(--text); font-family: var(--sans); overflow: hidden; }
   #app { display: flex; flex-direction: column; height: 100vh; }
-  #topbar { display: flex; align-items: center; gap: 18px; padding: 12px 18px; background: linear-gradient(180deg, rgba(19,28,44,.92), rgba(14,21,34,.78)); border-bottom: 1px solid var(--border); backdrop-filter: blur(8px); z-index: 20; }
-  .brand { display: flex; align-items: center; gap: 12px; cursor: pointer; }
-  .logo { width: 34px; height: 34px; border-radius: 9px; background: radial-gradient(circle at 30% 30%, #6fe6ff, #1aa7d6 60%, #0b4f6b); box-shadow: 0 0 22px rgba(53,208,255,.55), inset 0 0 12px rgba(255,255,255,.35); }
-  .brand h1 { margin: 0; font-size: 15px; letter-spacing: .22em; font-weight: 700; }
-  .brand .sub { margin: 1px 0 0; font-size: 10.5px; color: var(--text-faint); letter-spacing: .14em; text-transform: uppercase; }
-  .chips { display: flex; gap: 8px; margin-left: 6px; }
-  .chip { display: flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 999px; background: var(--panel); border: 1px solid var(--border); font-size: 12px; color: var(--text-dim); user-select: none; }
-  .chip .dot { width: 9px; height: 9px; border-radius: 50%; }
-  .chip .dot.awake { background: var(--awake); box-shadow: 0 0 8px var(--awake); }
-  .chip .dot.sleeping { background: var(--sleeping); }
-  .chip .dot.failing { background: var(--failing); box-shadow: 0 0 8px var(--failing); }
-  .chip .n { font-family: var(--mono); color: var(--text); }
-  .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
-  .status { font-size: 11px; color: var(--text-faint); font-family: var(--mono); display: flex; align-items: center; gap: 6px; }
-  .status .led { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  #topbar { display: flex; align-items: center; gap: 16px; padding: 10px 18px; background: linear-gradient(180deg, rgba(19,28,44,.92), rgba(14,21,34,.78)); border-bottom: 1px solid var(--border); backdrop-filter: blur(8px); z-index: 20; flex: 0 0 auto; }
+  .brand { display: flex; align-items: center; gap: 10px; cursor: pointer; flex: 0 0 auto; }
+  .logo { width: 28px; height: 28px; border-radius: 8px; background: radial-gradient(circle at 30% 30%, #6fe6ff, #1aa7d6 60%, #0b4f6b); box-shadow: 0 0 18px rgba(53,208,255,.45), inset 0 0 10px rgba(255,255,255,.3); }
+  .brand h1 { margin: 0; font-size: 13px; letter-spacing: .2em; font-weight: 700; }
+  .topbar-main { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+  .root-picker { display: flex; align-items: center; min-width: 0; }
+  #root-select { max-width: 250px; min-width: 110px; background: var(--bg); border: 1px solid var(--border); border-radius: 7px; color: var(--text); font-family: var(--mono); font-size: 11px; padding: 6px 26px 6px 9px; appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-faint) 50%), linear-gradient(135deg, var(--text-faint) 50%, transparent 50%); background-position: calc(100% - 13px) 50%, calc(100% - 9px) 50%; background-size: 4px 4px, 4px 4px; background-repeat: no-repeat; }
+  #root-select:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+  #root-select:disabled { opacity: .5; }
+  .unread-btn { display: flex; align-items: center; gap: 7px; padding: 6px 10px; border: 1px solid rgba(53,208,255,.4); border-radius: 999px; background: rgba(53,208,255,.06); color: var(--accent); font-family: var(--mono); font-size: 10.5px; cursor: pointer; white-space: nowrap; }
+  .unread-btn:hover { background: rgba(53,208,255,.13); }
+  .unread-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+  .unread-btn .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 7px var(--accent); }
+  .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+  .modes { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .mode-btn { border: 0; background: transparent; color: var(--text-dim); padding: 6px 10px; font-family: var(--sans); font-size: 12px; cursor: pointer; }
+  .mode-btn:hover { color: var(--text); }
+  .mode-btn[aria-pressed="true"] { background: rgba(53,208,255,.12); color: var(--accent); }
+  .mode-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
+  #sandbox-open { text-decoration: none; }
+  .status { font-size: 10.5px; color: var(--text-faint); font-family: var(--mono); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .status .led { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
   .status.error .led { background: var(--failing); box-shadow: 0 0 8px var(--failing); }
   .status.error { color: var(--failing); }
   .btn { font-family: var(--sans); font-size: 12.5px; cursor: pointer; border-radius: 8px; padding: 8px 14px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--text); }
@@ -45,9 +52,134 @@
   .btn.ghost { background: transparent; }
   .btn.tiny { padding: 4px 9px; border-radius: 7px; font-size: 12px; }
   .btn.danger { color: var(--failing); }
-  #stage { position: relative; flex: 1; overflow: hidden; }
+  #stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
   #graph { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; display: block; }
   #graph:active { cursor: grabbing; }
+  #sandbox { position: absolute; inset: 0; z-index: 25; background: var(--bg); }
+  #sandbox iframe { display: block; width: 100%; height: 100%; border: 0; background: var(--bg); }
+
+  /* run view */
+  #run { position: absolute; inset: 0; z-index: 14; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); transform: translateY(101%); transition: transform .26s cubic-bezier(.32,.72,.28,1); will-change: transform; }
+  #run.open { transform: translateY(0); }
+  @media (prefers-reduced-motion: reduce) { #run { transition: none; } }
+  #run-bar { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 20px; border-bottom: 1px solid var(--border); background: linear-gradient(180deg, rgba(9,14,22,.99), rgba(9,14,22,.92)); }
+  #run-label { font-family: var(--mono); font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--text-faint); }
+  #run-close { border: 1px solid var(--border-2); border-radius: 999px; padding: 4px 12px; background: var(--panel-2); color: var(--text-dim); font-family: var(--mono); font-size: 10.5px; cursor: pointer; }
+  #run-close:hover { border-color: var(--accent); color: var(--accent); }
+  #run-close:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+  #run-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 24px 70px; }
+  #root-header { position: sticky; top: 0; z-index: 10; max-width: 880px; margin: 0 auto; padding: 22px 0 14px; background: linear-gradient(180deg, rgba(9,14,22,.97) 70%, rgba(9,14,22,.86)); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); }
+  .root-head-top { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+  #root-title { margin: 0; font-family: var(--mono); font-size: 19px; line-height: 1.25; font-weight: 700; color: #e6faff; overflow-wrap: anywhere; }
+  .root-meta { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); white-space: nowrap; }
+  .root-meta .fail { color: var(--failing); }
+  .root-meta .awake { color: var(--accent); }
+  #root-instruction { margin: 5px 0 9px; font-size: 12.5px; line-height: 1.45; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .root-deps { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; }
+  .dep-box { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; padding: 4px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); color: var(--text-dim); font-family: var(--mono); font-size: 10.5px; cursor: pointer; }
+  .dep-box:hover { border-color: var(--border-2); color: var(--text); }
+  .dep-box:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+  .dep-box .dep-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--sleeping); flex: 0 0 auto; }
+  .dep-box.state-awake .dep-dot { background: var(--awake); box-shadow: 0 0 6px var(--awake); }
+  .dep-box.state-failing .dep-dot { background: var(--failing); box-shadow: 0 0 6px var(--failing); }
+  .dep-box.reported .dep-dot { background: var(--ok); }
+  .dep-box.active { border-color: var(--accent); background: rgba(53,208,255,.12); color: #dff3ff; box-shadow: 0 0 0 1px rgba(53,208,255,.16); }
+  .dep-box.active .dep-dot { background: var(--accent); box-shadow: 0 0 7px var(--accent); }
+  .dep-box-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+  .root-bar { display: flex; height: 4px; border-radius: 2px; overflow: hidden; background: var(--border); }
+  .root-seg { display: block; height: 100%; }
+  .root-seg.done { background: var(--ok); }
+  .root-seg.awake { background: var(--awake); }
+  .root-seg.failing { background: var(--failing); }
+  .root-seg.pending { background: var(--border-2); }
+  #run-body { max-width: 880px; margin: 0 auto; padding-top: 16px; }
+
+  /* live card */
+  #live { margin: 16px 0 0; padding: 9px 12px 8px; border: 1px solid rgba(53,208,255,.32); border-radius: 10px; background: rgba(6,43,58,.34); }
+  #live-head { display: flex; align-items: baseline; gap: 10px; font-family: var(--mono); font-size: 10.5px; line-height: 1.3; color: var(--text-faint); }
+  #live-task { color: #b8ecff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #live-meta { margin-left: auto; white-space: nowrap; }
+  #live-meta[data-status="streaming"] { color: var(--awake); }
+  #live-meta[data-status="stalled"], #live-meta[data-status="ended"] { color: var(--warn); }
+  #live-tail { height: calc(3 * 1.35em); overflow: hidden; white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12px; line-height: 1.35; color: var(--text); }
+  #live-text { white-space: pre-wrap; }
+  #live-caret { color: var(--awake); margin-left: 1px; animation: livecaret 1.05s steps(1) infinite; }
+  #live-caret.quiet { animation: none; opacity: .25; }
+  @keyframes livecaret { 0%, 49% { opacity: .15; } 50%, 100% { opacity: 1; } }
+
+  /* reports */
+  .feed-kicker { display: flex; align-items: baseline; gap: 10px; margin: 2px 0 2px; font-family: var(--mono); font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--text-faint); }
+  .root-new { display: flex; justify-content: flex-end; margin-top: 8px; }
+  .root-new button { border: 1px solid rgba(53,208,255,.4); background: rgba(53,208,255,.07); color: var(--accent); border-radius: 999px; padding: 4px 11px; font-family: var(--mono); font-size: 10.5px; cursor: pointer; }
+  .root-new button:hover { background: rgba(53,208,255,.14); }
+  .root-new button:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+  .report-card { position: relative; padding: 16px 0 20px; border-top: 1px solid var(--border); }
+  .report-card:first-of-type { border-top: 1px solid var(--border); }
+  .report-card.unread::before { content: ''; position: absolute; left: -14px; top: 19px; bottom: 20px; width: 2px; border-radius: 2px; background: var(--accent); }
+  .report-head { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; margin-bottom: 9px; }
+  .report-title { border: 0; background: none; padding: 0; color: #dff3ff; font-family: var(--mono); font-size: 13.5px; font-weight: 650; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
+  .report-title:hover { color: var(--accent); }
+  .report-title:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+  .report-time { font-family: var(--mono); font-size: 10.5px; color: var(--text-faint); white-space: nowrap; }
+  .report-new { font-family: var(--mono); font-size: 9px; letter-spacing: .1em; color: var(--accent); border: 1px solid rgba(53,208,255,.5); border-radius: 999px; padding: 1px 6px; }
+  .report-marker { font-family: var(--mono); font-size: 9px; letter-spacing: .07em; text-transform: uppercase; color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; white-space: nowrap; }
+  .report-marker.failing { color: var(--failing); border-color: rgba(255,77,94,.5); }
+  .report-marker.root { color: var(--accent); border-color: rgba(53,208,255,.5); }
+  .report-marker.prev { color: var(--warn); border-color: rgba(251,191,36,.45); }
+  .report-spacer { margin-left: auto; }
+  .report-toggle { border: 0; background: none; color: var(--text-faint); font-family: var(--mono); font-size: 10.5px; cursor: pointer; padding: 2px 0; white-space: nowrap; }
+  .report-toggle:hover { color: var(--text); }
+  .report-toggle:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+  .report-body { font-size: 13px; line-height: 1.65; color: var(--text); overflow-wrap: anywhere; }
+  .report-body.snippet { color: var(--text-dim); white-space: pre-wrap; }
+  .report-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .report-actions .btn { padding: 3px 9px; font-size: 11px; }
+  .failure-row { display: flex; align-items: baseline; gap: 9px; padding: 12px 0; border-top: 1px solid var(--border); font-family: var(--mono); font-size: 12px; color: #ffc0c6; }
+  .failure-row .task { color: #ffd7db; font-weight: 650; }
+  .run-empty { padding: 46px 16px 30px; text-align: center; color: var(--text-dim); }
+  .run-empty h2 { margin: 0 0 7px; font-size: 16px; color: var(--text); }
+  .run-empty p { margin: 0; font-size: 12.5px; }
+
+  /* task details */
+  .task-details { margin-top: 12px; border: 1px solid var(--border); border-radius: 10px; background: rgba(14,21,34,.55); padding: 12px 14px; }
+  .task-details .detail-title { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+  .task-details .name { font-family: var(--mono); font-size: 13.5px; font-weight: 650; color: #dff3ff; overflow-wrap: anywhere; }
+  .details-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px 14px; margin: 12px 0; }
+  .meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .meta .k { font-size: 9px; text-transform: uppercase; letter-spacing: .1em; color: var(--text-faint); }
+  .meta .v { font-size: 11.5px; font-family: var(--mono); color: var(--text); overflow-wrap: anywhere; }
+  .section { margin-top: 14px; }
+  .section > h3 { font-size: 9.5px; text-transform: uppercase; letter-spacing: .12em; color: var(--text-faint); margin: 0 0 7px; font-weight: 600; }
+  .instruction { font-size: 12.5px; line-height: 1.6; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+  .dep-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .dep { font-family: var(--mono); font-size: 11px; cursor: pointer; padding: 3px 9px; border-radius: 7px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text-dim); }
+  .dep:hover { border-color: var(--accent); color: var(--text); }
+  .dep.unresolved { border-style: dashed; color: var(--text-faint); cursor: default; }
+  .empty-note { font-size: 12px; color: var(--text-faint); font-style: italic; }
+  .detail-run { color: var(--awake); border-color: rgba(53,208,255,.45); }
+  .detail-run:disabled { color: var(--text-faint); border-color: var(--border); cursor: default; }
+  .detail-run:disabled:hover { border-color: var(--border); }
+  .run-note { margin: 0 0 10px; padding: 6px 9px; border-radius: 7px; border: 1px solid var(--border); background: rgba(7,11,18,.5); font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+  .run-note.error { border-color: rgba(255,77,94,.45); color: #ffc0c6; }
+
+  /* root list */
+  .root-list { display: flex; flex-direction: column; gap: 9px; padding-top: 8px; }
+  .root-row { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 12px; align-items: start; width: 100%; text-align: left; padding: 15px 14px; border: 1px solid var(--border); border-radius: 12px; background: rgba(14,21,34,.45); color: var(--text); cursor: pointer; }
+  .root-row:hover { border-color: var(--accent); background: rgba(14,21,34,.7); }
+  .root-row.temp { cursor: default; opacity: .75; }
+  .root-row.temp:hover { border-color: var(--border); background: rgba(14,21,34,.45); }
+  .root-row:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+  .root-dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 4px; background: var(--sleeping); }
+  .root-dot.awake { background: var(--awake); box-shadow: 0 0 8px var(--awake); }
+  .root-dot.failing { background: var(--failing); box-shadow: 0 0 8px var(--failing); }
+  .root-dot.reported { background: var(--ok); }
+  .root-row .r-title { display: block; font-family: var(--mono); font-size: 13.5px; font-weight: 650; color: #dff3ff; overflow-wrap: anywhere; }
+  .root-row .r-sub { display: block; margin-top: 3px; font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .root-row .r-meta { font-family: var(--mono); font-size: 10px; color: var(--text-faint); text-align: right; white-space: nowrap; }
+  .root-row .r-meta-line { display: block; }
+  .root-row .r-unread { display: block; margin-top: 4px; font-family: var(--mono); font-size: 9px; color: var(--accent); }
+
+  /* graph */
   .edge { fill: none; stroke: #2a3a55; stroke-width: 1.5; }
   .edge.unresolved { stroke: #4a3a5c; stroke-dasharray: 4 5; }
   .edge.proposal { stroke: #4a3a5c; stroke-dasharray: 4 5; }
@@ -60,11 +192,8 @@
   .node .halo { pointer-events: none; }
   .node .anchor-ring { display: none; fill: none; stroke: var(--warn); stroke-width: 2; stroke-dasharray: 5 4; opacity: .9; pointer-events: none; }
   .node.anchor .anchor-ring { display: block; }
-  .node .fresh { fill: none; stroke: var(--accent); stroke-width: 2.6; stroke-linecap: round; opacity: .85; }
+  .node .report-dot { fill: var(--ok); pointer-events: none; }
   .node .label { font-family: var(--mono); font-size: 11px; fill: var(--text-dim); pointer-events: auto; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
-  .node .fresh-track { fill: none; stroke: var(--border-2); stroke-width: 2.2; opacity: .55; pointer-events: none; }
-  .node .fresh-arc { fill: none; stroke: var(--ok); stroke-width: 2.2; stroke-linecap: round; pointer-events: none; }
-  .node.proposal .fresh-track, .node.proposal .fresh-arc, .node.temp .fresh-track, .node.temp .fresh-arc { display: none; }
   .node.state-sleeping .core { fill: #131c2b; stroke: var(--sleeping); }
   .node.state-sleeping .label { fill: var(--text-faint); }
   .node.state-awake .core { fill: #062b3a; stroke: var(--awake); }
@@ -85,12 +214,13 @@
   .node.kind-root .ring2 { display: block; stroke: var(--accent); stroke-width: 1.6; opacity: .9; }
   .node.kind-root .label { font-weight: 700; font-size: 12px; fill: #e6faff; }
   .node.proposal .core { fill: rgba(251,191,36,.06); stroke: var(--warn); stroke-dasharray: 6 5; stroke-width: 1.8; }
-  .node.proposal .ring2, .node.proposal .halo { display: none; }
+  .node.proposal .ring2, .node.proposal .halo, .node.proposal .report-dot { display: none; }
   .node.proposal .label { fill: var(--warn); opacity: .85; font-size: 10.5px; }
   .node.temp .core { fill: #0e1522; stroke: var(--text-faint); stroke-dasharray: 4 5; }
-  .node.temp .ring2, .node.temp .halo { display: none; }
+  .node.temp .ring2, .node.temp .halo, .node.temp .report-dot { display: none; }
   .node.temp .label { fill: var(--text-faint); }
-  .node.selected .core { stroke-width: 3.2; }
+  .node:focus-visible .core { filter: drop-shadow(0 0 6px var(--accent)); }
+  .node:focus-visible .label { fill: #dff3ff; }
   .node .cursor-ring { display: none; fill: none; stroke: var(--cursor); stroke-width: 4; pointer-events: none; filter: drop-shadow(0 0 8px rgba(255,77,216,.95)); }
   .node.match-current .cursor-ring { display: block; animation: cursorpulse 1.1s ease-in-out infinite; }
   .node.match-current .core { stroke: var(--cursor) !important; stroke-width: 3.6; }
@@ -99,66 +229,63 @@
   @keyframes cursorpulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
   #graph.find-active .node:not(.match) { opacity: .13; }
   #graph.find-active .edge:not(.match) { opacity: .06; }
-  #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
-  #empty.hidden { display: none; }
-  #empty .card { pointer-events: auto; text-align: center; max-width: 380px; padding: 30px 34px; border-radius: 16px; background: rgba(14,21,34,.82); border: 1px solid var(--border); box-shadow: var(--shadow); }
-  #empty h2 { margin: 0 0 6px; font-size: 18px; }
-  #empty p { margin: 0 0 18px; color: var(--text-dim); font-size: 13px; }
   #findbar { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; z-index: 16; background: rgba(14,21,34,.95); border: 1px solid var(--border-2); padding: 6px 8px; border-radius: 10px; box-shadow: var(--shadow); }
   #findbar.hidden { display: none; }
   #find-input { width: 320px; background: transparent; border: none; outline: none; color: var(--text); font-size: 13px; }
   #find-count { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); min-width: 62px; text-align: right; }
   #find-count.zero { color: var(--failing); }
-  #legend { position: absolute; left: 16px; bottom: 16px; z-index: 10; background: rgba(10,15,24,.72); border: 1px solid var(--border); border-radius: 11px; padding: 10px 13px; font-size: 11.5px; color: var(--text-dim); display: grid; gap: 6px; backdrop-filter: blur(6px); }
-  .legend-row { display: flex; align-items: center; gap: 8px; }
-  .legend-sep { height: 1px; background: var(--border); margin: 2px 0; }
-  .legend-row .dot { width: 10px; height: 10px; border-radius: 50%; }
-  .legend-row .dot.awake { background: var(--awake); box-shadow: 0 0 8px var(--awake); }
-  .legend-row .dot.sleeping { background: var(--sleeping); }
-  .legend-row .dot.failing { background: var(--failing); box-shadow: 0 0 8px var(--failing); }
-  .legend-row .shape { width: 13px; height: 13px; border-radius: 50%; border: 1.8px solid var(--sleeping); }
-  .legend-row .shape.complex { width: 16px; height: 16px; border-width: 3px; border-style: double; }
-  .legend-row .shape.root { width: 18px; height: 18px; border-width: 3px; border-color: var(--accent); }
-  .legend-row .shape.proposal { width: 13px; height: 13px; border-style: dashed; border-color: var(--warn); }
-  #drawer { position: absolute; top: 0; right: 0; height: 100%; width: 500px; max-width: 92vw; background: linear-gradient(180deg, var(--panel), var(--bg-2)); border-left: 1px solid var(--border); box-shadow: -18px 0 50px rgba(0,0,0,.45); transform: translateX(102%); transition: transform .26s, width .2s; z-index: 30; display: flex; flex-direction: column; }
-  #drawer.open { transform: translateX(0); }
-  #drawer.wide { width: min(78vw, 1000px); }
-  .pane > header .actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-  .detail-body { padding: 18px; overflow: auto; flex: 1; outline: none; }
-  .detail-body:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
-  .reader-run { color: var(--awake); border-color: rgba(53,208,255,.45); }
-  .reader-run:disabled { color: var(--text-faint); border-color: var(--border); cursor: default; }
-  .reader-run:disabled:hover { background: transparent; }
-  .run-note { margin: 0 0 12px; padding: 6px 9px; border-radius: 7px; border: 1px solid var(--border); background: rgba(7,11,18,.5); font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); }
-  .run-note.error { border-color: rgba(255,77,94,.45); color: #ffc0c6; }
-  .pane { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
-  .pane > header { display: flex; align-items: center; justify-content: space-between; padding: 15px 18px; border-bottom: 1px solid var(--border); }
-  .pane > header h2 { margin: 0; font-size: 14px; letter-spacing: .04em; }
-  .detail-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-  .detail-title .name { font-family: var(--mono); font-size: 15px; font-weight: 650; color: #dff3ff; overflow-wrap: anywhere; word-break: normal; }
-  .badge { font-size: 10px; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: .09em; border: 1px solid var(--border-2); color: var(--text-dim); }
-  .badge.state-awake { color: var(--awake); border-color: var(--awake); }
-  .badge.state-sleeping { color: var(--text-dim); }
-  .badge.state-failing { color: var(--failing); border-color: var(--failing); }
-  .badge.state-complete { color: var(--ok); border-color: var(--ok); }
-  .badge.state-idle { color: var(--text-faint); }
-  .badge.kind-complex { color: var(--warn); border-color: var(--warn); }
-  .badge.kind-root { color: var(--accent); border-color: var(--accent); }
-  .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin: 16px 0; }
-  .meta { display: flex; flex-direction: column; gap: 3px; }
-  .meta .k { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: var(--text-faint); }
-  .meta .v { font-size: 12.5px; font-family: var(--mono); }
-  .freshbar { height: 5px; border-radius: 3px; background: var(--border); overflow: hidden; margin-top: 5px; }
-  .freshbar > i { display: block; height: 100%; background: var(--accent); }
-  .section { margin-top: 20px; }
-  .section > h3 { font-size: 10.5px; text-transform: uppercase; letter-spacing: .12em; color: var(--text-faint); margin: 0 0 9px; font-weight: 600; }
-  .instruction { font-size: 13px; line-height: 1.6; color: var(--text); white-space: pre-wrap; word-break: break-word; }
-  .dep-list { display: flex; flex-wrap: wrap; gap: 7px; }
-  .dep { font-family: var(--mono); font-size: 11.5px; cursor: pointer; padding: 4px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text-dim); }
-  .dep:hover { border-color: var(--accent); color: var(--text); }
-  .dep.unresolved { border-style: dashed; color: var(--text-faint); cursor: default; }
-  .empty-note { font-size: 12.5px; color: var(--text-faint); font-style: italic; }
-  pre.report { white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 0; }
+  #breadcrumb { position: absolute; top: 14px; left: 16px; z-index: 12; display: flex; align-items: center; gap: 8px; max-width: min(46vw, 460px); padding: 6px 13px; border-radius: 999px; background: rgba(14,21,34,.92); border: 1px solid var(--border-2); color: var(--text-dim); font-size: 12px; font-family: var(--mono); cursor: pointer; overflow: hidden; }
+  #breadcrumb:hover { border-color: var(--accent); }
+  #breadcrumb .bc-back { color: var(--accent); white-space: nowrap; }
+  #breadcrumb .bc-sep { color: var(--text-faint); }
+  #breadcrumb .bc-root { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* composer */
+  #composer { flex: 0 0 auto; border-top: 1px solid var(--border); background: linear-gradient(180deg, rgba(14,21,34,.97), rgba(10,15,24,.99)); padding: 10px 18px 12px; z-index: 20; }
+  #composer.event-task { border-top-color: rgba(251,191,36,.5); }
+  #composer.event-action { border-top-color: rgba(167,139,250,.5); }
+  #composer.event-question { border-top-color: rgba(95,168,255,.5); }
+  #composer.event-review { border-top-color: rgba(52,211,153,.5); }
+  #composer.mode-notice { border-top-color: rgba(255,77,94,.5); }
+  #composer-header { display: flex; align-items: baseline; gap: 10px; margin: 0 auto 4px; min-height: 18px; max-width: 880px; }
+  #composer-kind { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-faint); border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; }
+  #composer.event-task #composer-kind { color: var(--warn); border-color: rgba(251,191,36,.6); }
+  #composer.event-action #composer-kind { color: var(--action); border-color: rgba(167,139,250,.6); }
+  #composer.event-question #composer-kind { color: var(--question); border-color: rgba(95,168,255,.6); }
+  #composer.event-review #composer-kind { color: var(--review); border-color: rgba(52,211,153,.6); }
+  #composer.mode-busy #composer-kind { color: var(--awake); border-color: rgba(53,208,255,.5); }
+  #composer.mode-notice #composer-kind { color: var(--failing); border-color: rgba(255,77,94,.6); }
+  #composer-summary { font-size: 12.5px; color: var(--text-dim); min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .task-ref { display: inline-block; max-width: 100%; padding: 0 1px; border: 0; background: none; font: inherit; color: var(--text); cursor: pointer; vertical-align: bottom; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: underline dotted; text-underline-offset: 2px; }
+  .task-ref:hover { color: var(--action); text-decoration-color: var(--action); }
+  .task-ref:focus-visible { outline: none; box-shadow: 0 0 0 1px var(--action); border-radius: 3px; }
+  .task-ref-missing { color: var(--text-faint); }
+  #composer-details { max-height: 40vh; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 0 8px; max-width: 880px; margin: 0 auto; }
+  #composer-suggest { max-width: 880px; margin: 0 auto 6px; max-height: min(190px, 28vh); overflow-y: auto; border: 1px solid var(--border-2); border-radius: 9px; background: var(--panel); box-shadow: 0 -8px 28px rgba(0,0,0,.4); }
+  .suggest-item { display: block; width: 100%; text-align: left; padding: 7px 11px; border: 0; border-top: 1px solid var(--border); background: none; color: var(--text); cursor: pointer; font-family: var(--sans); }
+  .suggest-item:first-child { border-top: 0; }
+  .suggest-item:hover { background: rgba(53,208,255,.05); }
+  .suggest-item.active { background: rgba(53,208,255,.10); }
+  .suggest-title { display: block; font-family: var(--mono); font-size: 12px; color: #dff3ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .suggest-item.active .suggest-title { color: var(--accent); }
+  .suggest-sub { display: block; margin-top: 2px; font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .suggest-item:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
+  #app.mode-sandbox #composer-details { max-height: 30vh; }
+  #composer-details .proposal-card { background: rgba(14,21,34,.6); }
+  #composer-row { display: flex; align-items: flex-end; gap: 10px; max-width: 880px; margin: 0 auto; }
+  #composer-row.hidden { display: none; }
+  #composer-input { flex: 1; min-height: 40px; max-height: 168px; resize: none; overflow-y: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 9px; color: var(--text); font-family: var(--mono); font-size: 13px; line-height: 1.5; padding: 9px 11px; }
+  #composer-input:focus { outline: none; border-color: var(--accent); }
+  #composer-input:disabled { opacity: .55; }
+  #composer.mode-busy #composer-input { border-color: var(--border-2); opacity: .78; }
+  #composer-actions { display: flex; gap: 8px; }
+  #composer-foot { display: flex; align-items: center; gap: 10px; margin: 7px auto 0; min-height: 16px; max-width: 880px; }
+  #composer-hint { flex: 1; font-size: 11px; color: var(--text-faint); font-family: var(--mono); }
+  #composer-status { font-size: 11px; color: var(--text-dim); font-family: var(--mono); text-align: right; }
+  #composer-status.error { color: var(--failing); }
+  #composer-retry { padding: 2px 8px; }
+
+  /* composer situation cards */
   .proposal-card { border: 1px solid var(--border); background: var(--panel); border-radius: 10px; padding: 12px; }
   .proposal-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
   .proposal-name { font-family: var(--mono); font-size: 13px; font-weight: 650; color: #ffe7a3; word-break: break-all; }
@@ -182,56 +309,18 @@
   .tool-thumb { color: var(--text-faint); }
   .tool-details .proposal-deps { margin: 8px 10px 0; }
   .tool-details pre.report { margin: 6px 10px 10px; }
-  #composer { flex: 0 0 auto; border-top: 1px solid var(--border); background: linear-gradient(180deg, rgba(14,21,34,.97), rgba(10,15,24,.99)); padding: 10px 18px 12px; z-index: 20; }
-  #composer.event-task { border-top-color: rgba(251,191,36,.5); }
-  #composer.event-action { border-top-color: rgba(167,139,250,.5); }
-  #composer.event-question { border-top-color: rgba(95,168,255,.5); }
-  #composer.event-review { border-top-color: rgba(52,211,153,.5); }
-  #composer.mode-notice { border-top-color: rgba(255,77,94,.5); }
-  #composer-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; min-height: 18px; }
-  #composer-kind { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-faint); border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; }
-  #composer.event-task #composer-kind { color: var(--warn); border-color: rgba(251,191,36,.6); }
-  #composer.event-action #composer-kind { color: var(--action); border-color: rgba(167,139,250,.6); }
-  #composer.event-question #composer-kind { color: var(--question); border-color: rgba(95,168,255,.6); }
-  #composer.event-review #composer-kind { color: var(--review); border-color: rgba(52,211,153,.6); }
-  #composer.mode-busy #composer-kind { color: var(--awake); border-color: rgba(53,208,255,.5); }
-  #composer.mode-notice #composer-kind { color: var(--failing); border-color: rgba(255,77,94,.6); }
-  #composer-summary { font-size: 12.5px; color: var(--text-dim); min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .task-ref { display: inline-block; max-width: 100%; padding: 0 1px; border: 0; background: none; font: inherit; color: var(--text); cursor: pointer; vertical-align: bottom; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: underline dotted; text-underline-offset: 2px; }
-  .task-ref:hover { color: var(--action); text-decoration-color: var(--action); }
-  .task-ref:focus-visible { outline: none; box-shadow: 0 0 0 1px var(--action); border-radius: 3px; }
-  .task-ref-missing { color: var(--text-faint); }
-  #composer-details { max-height: 40vh; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 0 8px; }
-  #composer-details .proposal-card { background: rgba(14,21,34,.6); }
-  #live { margin: 2px 0 6px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 8px; background: rgba(7,11,18,.62); }
-  #live-head { display: flex; align-items: baseline; gap: 10px; font-family: var(--mono); font-size: 10.5px; line-height: 1.3; color: var(--text-faint); }
-  #live-task { color: #b8ecff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #live-meta { margin-left: auto; white-space: nowrap; }
-  #live-meta[data-status="streaming"] { color: var(--awake); }
-  #live-meta[data-status="stalled"], #live-meta[data-status="ended"] { color: var(--warn); }
-  #live-tail { height: calc(3 * 1.35em); overflow: hidden; white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12px; line-height: 1.35; color: var(--text); }
-  #live-text { white-space: pre-wrap; }
-  #live-caret { color: var(--awake); margin-left: 1px; animation: livecaret 1.05s steps(1) infinite; }
-  #live-caret.quiet { animation: none; opacity: .25; }
-  @keyframes livecaret { 0%, 49% { opacity: .15; } 50%, 100% { opacity: 1; } }
-  #composer-row { display: flex; align-items: flex-end; gap: 10px; }
-  #composer-row.hidden { display: none; }
-  #composer-input { flex: 1; min-height: 38px; max-height: 168px; resize: none; overflow-y: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 9px; color: var(--text); font-family: var(--mono); font-size: 13px; line-height: 1.5; padding: 9px 11px; }
-  #composer-input:focus { outline: none; border-color: var(--accent); }
-  #composer-input:disabled { opacity: .55; }
-  #composer.mode-busy #composer-input { border-color: var(--border-2); opacity: .78; }
-  #composer-actions { display: flex; gap: 8px; }
-  #composer-foot { display: flex; align-items: center; gap: 10px; margin-top: 7px; min-height: 16px; }
-  #composer-hint { flex: 1; font-size: 11px; color: var(--text-faint); font-family: var(--mono); }
-  #composer-status { font-size: 11px; color: var(--text-dim); font-family: var(--mono); text-align: right; }
-  #composer-status.error { color: var(--failing); }
-  #composer-retry { padding: 2px 8px; }
-  #breadcrumb { position: absolute; top: 14px; left: 16px; z-index: 12; display: flex; align-items: center; gap: 8px; max-width: min(46vw, 460px); padding: 6px 13px; border-radius: 999px; background: rgba(14,21,34,.92); border: 1px solid var(--border-2); color: var(--text-dim); font-size: 12px; font-family: var(--mono); cursor: pointer; overflow: hidden; }
-  #breadcrumb:hover { border-color: var(--accent); }
-  #breadcrumb .bc-back { color: var(--accent); white-space: nowrap; }
-  #breadcrumb .bc-sep { color: var(--text-faint); }
-  #breadcrumb .bc-root { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .report-md { font-size: 13px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
+  pre.report { white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 0; }
+  .badge { font-size: 10px; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: .09em; border: 1px solid var(--border-2); color: var(--text-dim); }
+  .badge.state-awake { color: var(--awake); border-color: var(--awake); }
+  .badge.state-sleeping { color: var(--text-dim); }
+  .badge.state-failing { color: var(--failing); border-color: var(--failing); }
+  .badge.state-complete { color: var(--ok); border-color: var(--ok); }
+  .badge.state-idle { color: var(--text-faint); }
+  .badge.kind-complex { color: var(--warn); border-color: var(--warn); }
+  .badge.kind-root { color: var(--accent); border-color: var(--accent); }
+
+  /* report markdown */
+  .report-md { font-size: 13px; line-height: 1.65; color: var(--text); overflow-wrap: anywhere; }
   .report-md > :first-child { margin-top: 0; }
   .report-md h1, .report-md h2, .report-md h3, .report-md h4 { color: #dff3ff; line-height: 1.3; margin: 18px 0 8px; font-size: 14px; }
   .report-md h1 { font-size: 17px; }
@@ -254,22 +343,51 @@
 <body>
 <div id="app">
   <header id="topbar">
-    <div class="brand" id="brand">
-      <span class="logo"></span>
+    <div class="brand" id="brand" role="button" tabindex="0" aria-label="All roots">
+      <div class="logo"></div>
       <div>
-        <h1>OPTIGRAPH</h1>
-        <p class="sub">task network console</p>
+        <h1>OPTIMUS CONSOLE</h1>
       </div>
     </div>
-    <div class="chips" id="chips"></div>
+    <div class="topbar-main">
+      <label class="root-picker">
+        <span class="hidden">Active root</span>
+        <select id="root-select" aria-label="Active root"></select>
+      </label>
+      <button id="unread-reports" class="unread-btn hidden" type="button"></button>
+    </div>
     <div class="topbar-actions">
+      <div class="modes" role="group" aria-label="Console view">
+        <button id="mode-run" class="mode-btn" type="button" aria-pressed="false">Run</button>
+        <button id="mode-map" class="mode-btn" type="button" aria-pressed="true">Map</button>
+        <button id="mode-sandbox" class="mode-btn" type="button" aria-pressed="false">Sandbox</button>
+      </div>
+      <a id="sandbox-open" class="btn tiny ghost hidden" href="#" target="_blank" rel="noopener noreferrer" aria-label="Open the sandbox in a new tab" title="Open the sandbox in a new tab">Open ↗</a>
       <span class="status" id="status"><span class="led"></span><span id="status-text">connecting</span></span>
     </div>
   </header>
   <main id="stage">
-    <svg id="graph"></svg>
+    <div id="run" inert aria-hidden="true">
+      <div id="run-bar">
+        <span id="run-label">Run</span>
+        <button id="run-close" type="button" title="Close Run and show the map (Esc)">↓ Map</button>
+      </div>
+      <div id="run-scroll">
+        <header id="root-header" class="hidden">
+          <div class="root-head-top">
+            <h2 id="root-title"></h2>
+            <span id="root-meta" class="root-meta"></span>
+          </div>
+          <p id="root-instruction"></p>
+          <div id="root-deps" class="root-deps hidden" role="group" aria-label="Direct dependencies"></div>
+          <div id="root-bar" class="root-bar" aria-hidden="true"></div>
+          <div id="root-new" class="root-new hidden"><button id="root-new-btn" type="button"></button></div>
+        </header>
+        <div id="run-body"></div>
+      </div>
+    </div>
+    <svg id="graph" class="hidden"></svg>
     <button id="breadcrumb" class="hidden" title="Back to overview"></button>
-    <div id="empty" class="hidden"><div class="card"><h2>No tasks yet</h2><p>Describe a root task below to start the network.</p></div></div>
     <div id="findbar" class="hidden">
       <input id="find-input" type="text" placeholder="Find tasks..." autocomplete="off"/>
       <span id="find-count"></span>
@@ -277,19 +395,9 @@
       <button id="find-next" class="btn tiny">↓</button>
       <button id="find-close" class="btn tiny">✕</button>
     </div>
-    <div id="legend">
-      <div class="legend-row"><span class="dot awake"></span>awake</div>
-      <div class="legend-row"><span class="dot sleeping"></span>sleeping</div>
-      <div class="legend-row"><span class="dot failing"></span>failing</div>
-      <div class="legend-sep"></div>
-      <div class="legend-row"><span class="shape root"></span>root</div>
-      <div class="legend-row"><span class="shape complex"></span>complex</div>
-      <div class="legend-row"><span class="shape simple"></span>simple</div>
-      <div class="legend-row"><span class="shape proposal"></span>proposed</div>
+    <div id="sandbox" class="hidden">
+      <iframe id="sandbox-frame" title="AIO sandbox" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
     </div>
-    <aside id="drawer">
-      <section id="detail" class="pane hidden"></section>
-    </aside>
   </main>
   <section id="composer">
     <header id="composer-header">
@@ -297,12 +405,9 @@
       <span id="composer-summary"></span>
     </header>
     <div id="composer-details" class="hidden"></div>
-    <div id="live" class="hidden">
-      <div id="live-head"><span id="live-task"></span><span id="live-meta"></span></div>
-      <div id="live-tail"><span id="live-text"></span><span id="live-caret">▍</span></div>
-    </div>
+    <div id="composer-suggest" class="suggest hidden" role="listbox" aria-label="Matching root tasks"></div>
     <div id="composer-row">
-      <textarea id="composer-input" rows="1" autocomplete="off" spellcheck="false"></textarea>
+      <textarea id="composer-input" rows="1" autocomplete="off" spellcheck="false" role="combobox" aria-haspopup="listbox" aria-autocomplete="list" aria-controls="composer-suggest" aria-expanded="false"></textarea>
       <div id="composer-actions">
         <button id="composer-primary" class="btn primary">Submit</button>
       </div>
@@ -321,6 +426,7 @@ import { marked } from 'https://cdn.jsdelivr.net/npm/marked@13/+esm';
 import DOMPurify from 'https://cdn.jsdelivr.net/npm/dompurify@3/+esm';
 
 const TASKS_URL = '/tasks', REVIEW_URL = '/review', POLL_INTERVAL = 2000, DEFAULT_TTL = 60;
+const SANDBOX_URL = `http://${location.hostname || '127.0.0.1'}:8080/`;
 const STREAM_URL = '/tasks/stream';
 const STREAM_QUIET_MS = 2000, STREAM_STALL_MS = 15000;
 const STREAM_MAX_CHARS = 64 * 1024, STREAM_WINDOW_CHARS = 2000, STREAM_TAIL_LINES = 6;
@@ -330,11 +436,13 @@ const EVENT_CLASSES = { 'task-proposal': 'event-task', 'tool-approval': 'event-a
 
 const state = {
   tasks: new Map(),
-  focusRootId: null,
-  selectedId: null,
+  mode: 'map',
+  activeRootId: null,
+  rootPinned: true,
   anchorId: null,
   tempRoot: null,
   tempBaseline: null,
+  sandboxReturn: 'map',
   situation: null,
   situationSig: null,
   situationStatus: 'idle',
@@ -343,12 +451,17 @@ const state = {
   submitError: null,
   reviewError: null,
   composerMode: null,
+  suggestOpen: false,
+  suggestIndex: -1,
+  suggestItems: [],
+  suggestRenderSig: null,
+  suggestScrolledIndex: -2,
+  suggestDismissed: false,
   actionLock: false,
   actionLockTimer: null,
   layout: null,
   signature: null,
   viewport: d3.zoomIdentity,
-  readerDismissedFor: null,
   run: { id: null, pending: false, error: null },
   stream: {
     status: 'idle',
@@ -370,7 +483,17 @@ const state = {
   },
   awakeSince: new Map(),
   envelopeSeen: false,
-  find: { open: false, query: '', matches: [], index: 0, returnFocus: null },
+  reportsSeeded: false,
+  seenAt: new Map(),
+  unread: new Map(),
+  expandedReports: new Set(),
+  detailsTaskId: null,
+  feedReset: false,
+  followBottom: false,
+  reportSig: null,
+  rootListSig: null,
+  rootDepsSig: null,
+  find: { open: false, query: '', matches: [], index: 0, returnMode: 'run', returnRoot: null },
   error: null,
 };
 
@@ -393,13 +516,7 @@ function normKind(k) { return k === 'root' ? 'root' : (k === 'complex' ? 'comple
 function normState(s) { return s === 'awake' ? 'awake' : (s === 'failing' ? 'failing' : 'sleeping'); }
 function nodeRadius(t) { return t && t.kind === 'root' ? 26 : (t && t.kind === 'complex' ? 26 : 18); }
 function ghostId(title) { return '__sit__:' + title; }
-function freshness(t) {
-  if (!t.reportAt) return 0;
-  const at = Date.parse(t.reportAt);
-  if (!isFinite(at)) return 0;
-  const age = (Date.now() - at) / (t.ttl * 60 * 1000);
-  return Math.max(0, Math.min(1, 1 - age));
-}
+
 function relTime(ts) {
   const at = Date.parse(ts);
   if (!isFinite(at)) return '—';
@@ -540,11 +657,103 @@ function rootOwning(id) {
   }
   return null;
 }
+function setActiveRoot(id, pin = false) {
+  const next = id && state.tasks.has(id) && state.tasks.get(id).kind === 'root' ? id : null;
+  if (next !== state.activeRootId) {
+    state.activeRootId = next;
+    state.expandedReports.clear();
+    state.detailsTaskId = null;
+    state.feedReset = true;
+    state.reportSig = null;
+    state.rootListSig = null;
+    state.rootDepsSig = null;
+  }
+  if (pin) state.rootPinned = true;
+}
+function deriveActiveRoot() {
+  const s = state.situation;
+  const anchor = s && !s.unsupported ? s.parent : null;
+  if (anchor && state.tasks.has(anchor)) {
+    const root = rootOwning(anchor);
+    if (root) return root;
+  }
+  const awake = currentAwakeTask();
+  if (awake && !state.rootPinned) {
+    const root = rootOwning(awake.id);
+    if (root) return root;
+  }
+  if (state.activeRootId && state.tasks.has(state.activeRootId)) return state.activeRootId;
+  return null;
+}
+function markSeen(id) {
+  const t = state.tasks.get(id);
+  if (!t || !t.report) return;
+  state.seenAt.set(id, t.reportAt || '');
+  state.unread.delete(id);
+}
+function newestUnreadId() {
+  let best = null, bestAt = -Infinity;
+  for (const [id, at] of state.unread) {
+    const t = state.tasks.get(id);
+    if (!t || !t.report) continue;
+    const ts = t.reportAt ? Date.parse(t.reportAt) : NaN;
+    const v = isFinite(ts) ? ts : 0;
+    if (!best || v > bestAt) { best = id; bestAt = v; }
+  }
+  return best;
+}
+function observeReports(prevTasks, nextTasks) {
+  const first = !state.reportsSeeded;
+  const newIds = [];
+  for (const [id, t] of nextTasks) {
+    if (!t.report) {
+      state.seenAt.delete(id);
+      state.unread.delete(id);
+      continue;
+    }
+    const at = t.reportAt || '';
+    if (first) { state.seenAt.set(id, at); continue; }
+    const prev = prevTasks.get(id);
+    const prevAt = prev ? (prev.reportAt || '') : null;
+    const isNew = prevAt !== at && (!state.seenAt.has(id) || state.seenAt.get(id) !== at);
+    if (isNew) {
+      state.unread.set(id, at);
+      newIds.push(id);
+    }
+  }
+  for (const id of [...state.seenAt.keys()]) if (!nextTasks.has(id)) state.seenAt.delete(id);
+  for (const id of [...state.unread.keys()]) {
+    if (!nextTasks.has(id) || !nextTasks.get(id).report) state.unread.delete(id);
+  }
+  for (const id of [...state.expandedReports]) if (!nextTasks.has(id)) state.expandedReports.delete(id);
+  state.reportsSeeded = true;
+  return newIds;
+}
+function feedNearBottom() {
+  const sc = document.getElementById('run-scroll');
+  if (!sc) return true;
+  return sc.scrollHeight - sc.scrollTop - sc.clientHeight <= 24;
+}
+function handleArrival(newIds) {
+  if (!newIds.length || state.mode !== 'run' || !state.activeRootId) return;
+  const closure = getClosure(state.activeRootId);
+  const inRoot = newIds.filter(id => closure.has(id));
+  if (!inRoot.length) return;
+  if (!feedNearBottom()) return;
+  inRoot.sort((a, b) => {
+    const ta = Date.parse(state.tasks.get(a).reportAt || '') || 0;
+    const tb = Date.parse(state.tasks.get(b).reportAt || '') || 0;
+    return ta - tb;
+  });
+  const newest = inRoot[inRoot.length - 1];
+  markSeen(newest);
+  state.followBottom = true;
+}
 function revealAnchor(parent) {
   if (!parent || !state.tasks.has(parent)) { state.anchorId = null; return; }
   state.anchorId = parent;
   const root = rootOwning(parent);
-  if (root) state.focusRootId = root;
+  if (root) setActiveRoot(root);
 }
 function activeGhosts() {
   const s = state.situation;
@@ -553,6 +762,7 @@ function activeGhosts() {
 }
 
 function applyEnvelope(env) {
+  const prevTasks = state.tasks;
   const prevAwake = currentAwakeTask();
   state.tasks = applyTasks(env.tasks);
   trackAwake(prevAwake);
@@ -575,25 +785,37 @@ function applyEnvelope(env) {
       state.actionLockTimer = null;
       renderComposer();
     }, 300);
-    if (next) revealAnchor(next.parent);
-    else state.anchorId = null;
+    if (next) {
+      revealAnchor(next.parent);
+      if (state.mode === 'map') state.signature = null;
+    } else {
+      state.anchorId = null;
+    }
   }
-  if (state.focusRootId && !state.tasks.has(state.focusRootId)) state.focusRootId = null;
-  if (state.selectedId && !state.tasks.has(state.selectedId)) state.selectedId = null;
+  const newIds = observeReports(prevTasks, state.tasks);
+  const root = deriveActiveRoot();
+  if (root !== state.activeRootId) setActiveRoot(root);
+  if (state.activeRootId && !state.tasks.has(state.activeRootId)) setActiveRoot(null);
   if (state.anchorId && !state.tasks.has(state.anchorId)) state.anchorId = null;
+  if (state.detailsTaskId && !state.tasks.has(state.detailsTaskId)) state.detailsTaskId = null;
   if (state.find.query.trim()) recomputeFind(false);
+  handleArrival(newIds);
   render();
   syncStream();
 }
-
 const svg = d3.select('#graph'), g = svg.append('g'), edgeL = g.append('g'), nodeL = g.append('g');
 svg.append('defs').append('marker').attr('id', 'arr').attr('viewBox', '0 0 10 10').attr('refX', 9).attr('refY', 5).attr('markerWidth', 6).attr('markerHeight', 6).attr('orient', 'auto-start-reverse').append('path').attr('d', 'M0,0 L10,5 L0,10 z').attr('fill', 'context-stroke');
 const zoom = d3.zoom().scaleExtent([.12, 4]).on('zoom', e => { state.viewport = e.transform; g.attr('transform', e.transform); });
 svg.call(zoom).on('dblclick.zoom', null);
 svg.on('click', e => {
   if (e.target !== svg.node()) return;
-  if (!state.selectedId && !state.focusRootId) return;
-  clearSelection();
+  if (state.find.open) return;
+  if (!state.activeRootId) return;
+  state.activeRootId = null;
+  state.rootPinned = true;
+  state.detailsTaskId = null;
+  state.expandedReports.clear();
+  render();
 });
 
 function build() {
@@ -602,8 +824,8 @@ function build() {
   const ghosts = activeGhosts();
   const ghostTitles = new Set(ghosts.map(g => g.title));
   const expanded = state.find.open;
-  if (expanded || (state.focusRootId && state.tasks.has(state.focusRootId))) {
-    const cl = expanded ? new Set(state.tasks.keys()) : getClosure(state.focusRootId);
+  if (expanded || (state.activeRootId && state.tasks.has(state.activeRootId))) {
+    const cl = expanded ? new Set(state.tasks.keys()) : getClosure(state.activeRootId);
     const real = [...cl].map(id => state.tasks.get(id)).filter(Boolean);
     const gg = new dagre.graphlib.Graph();
     gg.setGraph({ rankdir: 'BT', nodesep: 50, ranksep: 80, marginx: 60, marginy: 60 });
@@ -676,34 +898,73 @@ function build() {
   return L;
 }
 
-function readerVisible() {
-  return !!state.selectedId && state.readerDismissedFor !== state.selectedId;
-}
 function canvasWidth() {
   const graph = document.getElementById('graph');
-  const w = graph.clientWidth || 800;
-  if (!readerVisible()) return w;
-  const drawer = document.getElementById('drawer');
-  const dw = drawer.getBoundingClientRect().width || parseFloat(getComputedStyle(drawer).width) || 0;
-  return Math.max(320, w - dw);
+  return graph.clientWidth || 800;
 }
-function selectNode(id, focusReader = false) {
-  if (!state.tasks.has(id)) return;
+function scrollToReport(id) {
+  requestAnimationFrame(() => {
+    const sc = document.getElementById('run-scroll');
+    const card = sc && [...sc.querySelectorAll('[data-report-id]')].find(n => n.dataset.reportId === id);
+    if (card) {
+      const header = document.getElementById('root-header');
+      const offset = (header ? header.offsetHeight : 0) + 10;
+      const delta = (card.getBoundingClientRect().top - sc.getBoundingClientRect().top) - offset;
+      if (Math.abs(delta) > 1) sc.scrollTop += delta;
+      const title = card.querySelector('.report-title');
+      if (title) title.focus({ preventScroll: true });
+    }
+  });
+}
+function focusDetails(id) {
+  requestAnimationFrame(() => {
+    const node = document.querySelector(`[data-details-id="${CSS.escape(id)}"]`);
+    if (node) node.focus({ preventScroll: false });
+  });
+}
+function activateTask(id) {
+  const t = state.tasks.get(id);
+  if (!t) return;
   const root = rootOwning(id);
-  if (root && !state.find.open) state.focusRootId = root;
-  state.readerDismissedFor = null;
-  state.selectedId = id;
-  const relaid = render();
-  if (!relaid) centerOn(id);
-  if (focusReader) {
-    const body = document.querySelector('#detail .detail-body');
-    if (body) body.focus({ preventScroll: true });
+  if (!root) return;
+  if (state.find.open) closeFind(false);
+  setActiveRoot(root, true);
+  state.activeRootId = root;
+  state.detailsTaskId = t.report ? null : id;
+  if (t.report) {
+    state.expandedReports.add(id);
+    markSeen(id);
   }
+  state.mode = 'run';
+  render();
+  if (t.report) scrollToReport(id);
+  else focusDetails(id);
 }
-function clearSelection() {
-  state.selectedId = null;
-  state.readerDismissedFor = null;
-  state.focusRootId = null;
+function mapActivate(d) {
+  if (!d || d.ghost || d.temp) return;
+  if (state.find.open) { activateTask(d.id); return; }
+  const t = state.tasks.get(d.id);
+  if (!t) return;
+  if (t.kind === 'root') {
+    setActiveRoot(t.id, true);
+    state.mode = 'run';
+    render();
+    requestAnimationFrame(() => {
+      const titles = [...document.querySelectorAll('.report-title')];
+      const target = titles[titles.length - 1] || document.getElementById('run-close');
+      if (target) target.focus({ preventScroll: true });
+    });
+    return;
+  }
+  activateTask(d.id);
+}
+function goHome() {
+  state.activeRootId = null;
+  state.rootPinned = true;
+  state.detailsTaskId = null;
+  state.expandedReports.clear();
+  if (state.find.open) closeFind(false);
+  state.mode = 'map';
   render();
 }
 function centerOn(id) {
@@ -732,7 +993,6 @@ function paint() {
       state: p.ghost ? '' : (t ? t.state : 'sleeping'),
       lines: (p.label && p.label.lines) || [p.title || ''],
       hasReport: !!report,
-      fresh: report ? freshness(t) : 0,
     };
   });
 
@@ -747,8 +1007,7 @@ function paint() {
   ne.append('circle').attr('class', 'ring2');
   ne.append('circle').attr('class', 'anchor-ring');
   ne.append('circle').attr('class', 'core');
-  ne.append('circle').attr('class', 'fresh-track').attr('transform', 'rotate(-90)');
-  ne.append('circle').attr('class', 'fresh-arc').attr('transform', 'rotate(-90)');
+  ne.append('circle').attr('class', 'report-dot');
   ne.append('circle').attr('class', 'cursor-ring');
   ne.append('text').attr('class', 'label').attr('text-anchor', 'middle');
   const merged = nJoin.merge(ne);
@@ -760,13 +1019,11 @@ function paint() {
     sel.select('.ring2').attr('r', r + 5);
     sel.select('.anchor-ring').attr('r', r + 13);
     sel.select('.cursor-ring').attr('r', r + 2.5);
-    const fr = Math.max(4, r - 4), circ = 2 * Math.PI * fr;
-    const showFresh = d.hasReport && !d.ghost && !d.temp;
-    sel.select('.fresh-track').attr('r', fr).style('display', showFresh ? null : 'none');
-    sel.select('.fresh-arc')
-      .attr('r', fr)
-      .attr('stroke-dasharray', `${(circ * d.fresh).toFixed(2)} ${circ.toFixed(2)}`)
-      .style('display', showFresh ? null : 'none');
+    sel.select('.report-dot')
+      .attr('cx', r * 0.68)
+      .attr('cy', -r * 0.68)
+      .attr('r', 2.6)
+      .style('display', d.hasReport && !d.ghost && !d.temp ? null : 'none');
     const lab = sel.select('.label').attr('y', r + LABEL_GAP);
     lab.text(null);
     const lines = d.lines && d.lines.length ? d.lines : [d.title || ''];
@@ -775,7 +1032,6 @@ function paint() {
     if (d.temp) cls.push('temp');
     else if (d.ghost) cls.push('proposal', `kind-${d.kind}`);
     else cls.push(`kind-${d.kind}`, `state-${d.state}`);
-    if (d.id === state.selectedId) cls.push('selected');
     if (d.id === state.anchorId) cls.push('anchor');
     if (reviewAnchor && d.id === reviewAnchor) cls.push('review');
     if (findActive && state.find.matches.includes(d.id)) cls.push('match');
@@ -783,10 +1039,19 @@ function paint() {
     if (state.stream.status === 'open' && state.stream.task === d.id) cls.push('live');
     sel.attr('class', cls.join(' ')).attr('transform', `translate(${d.x},${d.y})`);
   });
+  merged
+    .attr('tabindex', d => (d.ghost || d.temp ? null : '0'))
+    .attr('role', d => (d.ghost || d.temp ? null : 'button'))
+    .attr('aria-label', d => (d.ghost || d.temp ? null : `${d.title}. ${d.state}${d.hasReport ? ', reported' : ''}`));
   merged.on('click', (e, d) => {
     e.stopPropagation();
-    if (d.ghost || d.temp) return;
-    selectNode(d.id);
+    mapActivate(d);
+  });
+  merged.on('keydown', (e, d) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    e.stopPropagation();
+    mapActivate(d);
   });
 
   const eJoin = edgeL.selectAll('path.edge').data(L.edges, (d, i) => d.source + '>' + d.target + i);
@@ -803,23 +1068,24 @@ function paint() {
 }
 
 function render() {
-  const ghostShown = activeGhosts().length ? state.situationSig : '';
-  const view = state.find.open ? 'find' : `focus:${state.focusRootId}`;
-  const sig = [...state.tasks.keys()].sort().join('|') + ':' + view + ':' + ghostShown + ':' + (state.tempRoot ? 'tmp' : '');
-  let relaid = false;
-  if (sig !== state.signature) {
-    state.signature = sig;
-    state.layout = build();
-    if (state.layout.bounds) { fit(); relaid = true; }
+  paintMode();
+  const needMap = state.mode !== 'sandbox' || state.find.open;
+  if (needMap) {
+    const ghostShown = activeGhosts().length ? state.situationSig : '';
+    const view = state.find.open ? 'find' : `focus:${state.activeRootId}`;
+    const sig = [...state.tasks.keys()].sort().join('|') + ':' + view + ':' + ghostShown + ':' + (state.tempRoot ? 'tmp' : '');
+    if (sig !== state.signature) {
+      state.signature = sig;
+      state.layout = build();
+      if (state.layout.bounds) fit();
+    }
+    paint();
   }
-  paint();
+  if (state.mode === 'run') renderRun();
   paintTop();
   renderComposer();
   paintFind();
   paintBreadcrumb();
-  renderReader();
-  document.getElementById('empty').classList.toggle('hidden', state.tasks.size !== 0 || !!state.tempRoot || !!state.error);
-  return relaid;
 }
 function fit() {
   const b = state.layout.bounds;
@@ -828,17 +1094,80 @@ function fit() {
   const k = Math.min(w / (b.width + 140), h / (b.height + 140), 2);
   svg.transition().duration(300).call(zoom.transform, d3.zoomIdentity.translate(w / 2, h / 2).scale(k).translate(-(b.minX + b.maxX) / 2, -(b.minY + b.maxY) / 2));
 }
+function paintMode() {
+  const app = document.getElementById('app');
+  app.className = `mode-${state.mode}`;
+  const panel = document.getElementById('run');
+  const open = state.mode === 'run';
+  panel.classList.toggle('open', open);
+  if (open) {
+    panel.removeAttribute('inert');
+    panel.removeAttribute('aria-hidden');
+  } else {
+    panel.setAttribute('inert', '');
+    panel.setAttribute('aria-hidden', 'true');
+  }
+  const sandbox = state.mode === 'sandbox';
+  document.getElementById('graph').classList.toggle('hidden', sandbox && !state.find.open);
+  document.getElementById('sandbox').classList.toggle('hidden', !sandbox);
+  document.getElementById('mode-run').setAttribute('aria-pressed', String(open));
+  document.getElementById('mode-map').setAttribute('aria-pressed', String(state.mode === 'map'));
+  document.getElementById('mode-sandbox').setAttribute('aria-pressed', String(sandbox));
+  const link = document.getElementById('sandbox-open');
+  link.href = SANDBOX_URL;
+  link.classList.toggle('hidden', !sandbox);
+}
+function rootActivity(root) {
+  const tasks = [...getClosure(root.id)].map(id => state.tasks.get(id)).filter(Boolean);
+  if (tasks.some(t => t.state === 'awake')) return 'awake';
+  if (tasks.some(t => t.state === 'failing')) return 'failing';
+  if (tasks.some(t => !!t.report)) return 'reported';
+  return '';
+}
 function paintTop() {
-  const c = { awake: 0, sleeping: 0, failing: 0 };
-  for (const t of state.tasks.values()) if (c[t.state] != null) c[t.state]++;
-  const chips = document.getElementById('chips');
-  chips.innerHTML = '';
-  [['awake', 'awake'], ['failing', 'failing'], ['sleeping', 'sleeping']].forEach(([k, l]) => {
-    chips.appendChild(el('span', { class: 'chip' }, [el('span', { class: `dot ${k}` }), el('span', { class: 'n', text: String(c[k]) }), el('span', { text: l })]));
-  });
+  const roots = getRoots();
+  const rsig = roots.map(r => {
+    const u = [...state.unread.keys()].filter(id => rootOwning(id) === r.id).length;
+    return `${r.id}|${r.state}|${r.report ? 1 : 0}|${u}`;
+  }).join('~');
+  const select = document.getElementById('root-select');
+  if (select.dataset.sig !== rsig) {
+    select.dataset.sig = rsig;
+    const hadFocus = document.activeElement === select;
+    select.replaceChildren();
+    select.append(el('option', { value: '', text: roots.length ? 'All roots' : 'No roots' }));
+    for (const r of roots) {
+      const marks = [];
+      const act = rootActivity(r);
+      if (act === 'awake') marks.push('●');
+      else if (act === 'failing') marks.push('!');
+      else if (act === 'reported') marks.push('·');
+      const u = [...state.unread.keys()].filter(id => rootOwning(id) === r.id).length;
+      if (u) marks.push(`(${u})`);
+      select.append(el('option', { value: r.id, text: `${marks.length ? marks.join(' ') + ' ' : ''}${r.title}` }));
+    }
+    select.disabled = !roots.length;
+    if (hadFocus) select.focus({ preventScroll: true });
+  }
+  select.value = state.activeRootId || '';
+
   const st = document.getElementById('status'), s = document.getElementById('status-text');
   if (state.error) { st.classList.add('error'); s.textContent = 'backend unreachable'; }
   else { st.classList.remove('error'); s.textContent = `live · ${state.tasks.size} task${state.tasks.size === 1 ? '' : 's'}`; }
+
+  const btn = document.getElementById('unread-reports');
+  const n = state.unread.size;
+  const closure = state.activeRootId ? getClosure(state.activeRootId) : null;
+  const outside = [...state.unread.keys()].some(id => !closure || !closure.has(id));
+  const show = n > 0 && (state.mode !== 'run' || outside);
+  btn.classList.toggle('hidden', !show);
+  if (show) {
+    const id = newestUnreadId();
+    const t = id ? state.tasks.get(id) : null;
+    btn.replaceChildren(el('span', { class: 'dot' }), el('span', { text: `${n} new report${n === 1 ? '' : 's'}` }));
+    btn.setAttribute('aria-label', `Open ${n} new report${n === 1 ? '' : 's'}${t ? `, newest from ${t.title}` : ''}`);
+    btn.title = t ? `Newest: ${t.title}` : '';
+  }
 }
 function awakeCount() {
   let n = 0;
@@ -847,7 +1176,7 @@ function awakeCount() {
 }
 function paintBreadcrumb() {
   const b = document.getElementById('breadcrumb');
-  const root = state.focusRootId && !state.find.open ? state.tasks.get(state.focusRootId) : null;
+  const root = state.mode === 'map' && !state.find.open && state.activeRootId ? state.tasks.get(state.activeRootId) : null;
   if (!root) {
     b.classList.add('hidden');
     b.textContent = '';
@@ -862,9 +1191,10 @@ function paintBreadcrumb() {
   );
 }
 document.getElementById('breadcrumb').onclick = () => {
-  state.focusRootId = null;
-  state.selectedId = null;
-  state.readerDismissedFor = null;
+  state.activeRootId = null;
+  state.rootPinned = true;
+  state.detailsTaskId = null;
+  state.expandedReports.clear();
   render();
 };
 function baseComposerMode() {
@@ -881,7 +1211,110 @@ function canReview() {
 }
 function growComposer(input) {
   input.style.height = 'auto';
-  input.style.height = Math.min(input.scrollHeight, 168) + 'px';
+  input.style.height = Math.min(input.scrollHeight + 2, 168) + 'px';
+}
+function suggestText(text) {
+  return String(text || '').toLowerCase().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function suggestCandidates() {
+  const q = suggestText(state.taskDraft);
+  if (!q) return [];
+  const active = state.activeRootId;
+  const matches = [];
+  for (const r of getRoots()) {
+    const title = suggestText(r.title);
+    const instruction = suggestText(r.instruction);
+    if (title === q) continue;
+    let rank = -1;
+    if (title.startsWith(q)) rank = 0;
+    else if (title.includes(q)) rank = 1;
+    else if (instruction.includes(q)) rank = 2;
+    if (rank < 0) continue;
+    matches.push({ root: r, rank });
+  }
+  matches.sort((a, b) => {
+    if (a.rank !== b.rank) return a.rank - b.rank;
+    if (a.root.id === active) return -1;
+    if (b.root.id === active) return 1;
+    return a.root.title.localeCompare(b.root.title);
+  });
+  return matches.slice(0, 6).map(m => m.root);
+}
+function chooseSuggestion(title) {
+  const input = document.getElementById('composer-input');
+  if (!input) return;
+  state.taskDraft = title;
+  state.submitError = null;
+  state.suggestDismissed = true;
+  state.suggestIndex = -1;
+  state.suggestRenderSig = null;
+  input.value = title;
+  growComposer(input);
+  renderComposer();
+  input.focus({ preventScroll: true });
+  input.setSelectionRange(title.length, title.length);
+}
+function renderSuggest() {
+  const box = document.getElementById('composer-suggest');
+  const input = document.getElementById('composer-input');
+  if (!box || !input) return;
+  const focused = document.activeElement === input;
+  const items = (baseComposerMode() === 'new' && !state.submitting && !state.error && !state.suggestDismissed && focused)
+    ? suggestCandidates()
+    : [];
+  const open = items.length > 0;
+  if (state.suggestIndex >= items.length) state.suggestIndex = items.length - 1;
+  if (state.suggestIndex < -1) state.suggestIndex = -1;
+  if (baseComposerMode() === 'new') {
+    const hint = document.getElementById('composer-hint');
+    if (hint) hint.textContent = open
+      ? (state.suggestIndex >= 0 ? '↑↓ choose · Enter accept · Esc dismiss' : '↑↓ choose · Enter to submit')
+      : 'Enter to submit · Shift+Enter for a new line';
+  }
+  const sig = `${open ? 1 : 0}|${items.map(r => `${r.id}\u0001${r.instruction}`).join('\u0002')}|${state.suggestIndex}`;
+  if (sig === state.suggestRenderSig) return;
+  state.suggestRenderSig = sig;
+  state.suggestOpen = open;
+  state.suggestItems = items;
+  if (!open) {
+    state.suggestIndex = -1;
+    state.suggestScrolledIndex = -2;
+    box.classList.add('hidden');
+    box.replaceChildren();
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+    return;
+  }
+  box.classList.remove('hidden');
+  const frag = document.createDocumentFragment();
+  items.forEach((r, i) => {
+    const row = el('button', {
+      class: `suggest-item${i === state.suggestIndex ? ' active' : ''}`,
+      type: 'button',
+      role: 'option',
+      id: `suggest-${i}`,
+      tabindex: '-1',
+      'aria-selected': String(i === state.suggestIndex),
+    }, [
+      el('span', { class: 'suggest-title', text: r.title }),
+      r.instruction ? el('span', { class: 'suggest-sub', text: r.instruction }) : null,
+    ]);
+    row.addEventListener('mousedown', e => e.preventDefault());
+    row.addEventListener('click', () => chooseSuggestion(r.title));
+    frag.append(row);
+  });
+  box.replaceChildren(frag);
+  input.setAttribute('aria-expanded', 'true');
+  if (state.suggestIndex >= 0) {
+    input.setAttribute('aria-activedescendant', `suggest-${state.suggestIndex}`);
+    if (state.suggestScrolledIndex !== state.suggestIndex) {
+      state.suggestScrolledIndex = state.suggestIndex;
+      const active = box.querySelector('.suggest-item.active');
+      if (active) active.scrollIntoView({ block: 'nearest' });
+    }
+  } else {
+    input.removeAttribute('aria-activedescendant');
+  }
 }
 let composerBodySig = null;
 function reportSizeLabel(n) {
@@ -897,10 +1330,10 @@ function renderComposerDetails(s) {
   const needsTask = s.type === 'review';
   const anchored = needsTask && s.parent ? state.tasks.get(s.parent) : null;
   const bodySig = needsTask
-    ? state.situationSig + ':' + (anchored
+    ? state.situationSig + ':' + state.situationStatus + ':' + (anchored
       ? JSON.stringify([anchored.title, anchored.kind, anchored.ttl, anchored.instruction, anchored.deps, anchored.reportAt, (anchored.report || '').length])
       : 'missing')
-    : state.situationSig;
+    : state.situationSig + ':' + state.situationStatus;
   if (bodySig === composerBodySig) return;
   composerBodySig = bodySig;
   box.innerHTML = '';
@@ -929,14 +1362,12 @@ function renderComposerDetails(s) {
       meta.append(el('button', {
         class: 'proposal-link',
         title: `Open report for ${anchored.title}`,
-        onclick: () => selectNode(anchored.id),
+        onclick: () => activateTask(anchored.id),
       }, ['Open report →']));
     }
     box.append(el('div', { class: 'proposal-card' }, [
       el('div', { class: 'proposal-head' }, [
         el('span', { class: 'proposal-name', text: anchored.title }),
-        el('span', { class: `badge kind-${anchored.kind}`, text: anchored.kind }),
-        el('span', { class: 'proposal-ttl', text: `ttl ${anchored.ttl}m` }),
       ]),
       meta,
       el('div', { class: 'proposal-instruction', text: 'Results are ready. Approve them, or describe a new direction to pivot.' }),
@@ -958,6 +1389,7 @@ function renderComposerDetails(s) {
     ]));
     return;
   }
+  if (s.type === 'task-proposal' && state.situationStatus === 'settled') return;
   for (const t of s.tasks) {
     box.append(el('div', { class: 'proposal-card' }, [
       el('div', { class: 'proposal-head' }, [
@@ -995,7 +1427,7 @@ function renderComposerSummary(summary, base, s, summaryText) {
     class: 'task-ref',
     type: 'button',
     title: `Open ${parent}`,
-    onclick: () => selectNode(parent),
+    onclick: () => activateTask(parent),
   }, [parent]));
 }
 function renderComposer() {
@@ -1056,9 +1488,8 @@ function renderComposer() {
   const wasDisabled = input.disabled;
   input.disabled = base === 'notice' || state.submitting || (base === 'review' && state.situationStatus !== 'idle');
   row.classList.toggle('hidden', base === 'notice');
-  if (wasDisabled && !input.disabled && base !== 'notice'
-    && document.activeElement === document.body
-    && !document.getElementById('drawer').classList.contains('open')) input.focus();
+  if (wasDisabled && !input.disabled && base !== 'notice' && state.mode === 'run'
+    && document.activeElement === document.body) input.focus();
 
   const empty = !value.trim();
   primary.classList.remove('hidden');
@@ -1125,14 +1556,16 @@ function renderComposer() {
   const prev = state.composerMode;
   state.composerMode = base;
   if (prev !== base) maybeFocusComposer(base);
+  renderSuggest();
 }
 function maybeFocusComposer(base) {
   if (base !== 'new' && base !== 'review') return;
+  if (state.mode !== 'run') return;
   if (base === 'review' && state.situationStatus !== 'idle') return;
-  const drawer = document.getElementById('drawer');
-  if (drawer.classList.contains('open')) return;
-  const a = document.activeElement;
-  if (a && a.id !== 'composer-input' && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) return;
+  const active = document.activeElement;
+  if (state.mode === 'sandbox' && active === document.getElementById('sandbox-frame')) return;
+  if (active && active.closest && (active.closest('#run') || active.closest('#graph') || active.closest('#composer'))) return;
+  if (active && active !== document.body) return;
   const input = document.getElementById('composer-input');
   if (!input.disabled) input.focus();
 }
@@ -1141,24 +1574,6 @@ function paintFind() {
   const n = state.find.matches.length;
   node.textContent = n ? `${state.find.index + 1}/${n}` : '0/0';
   node.classList.toggle('zero', n === 0);
-}
-
-function openDrawer() {
-  document.getElementById('detail').classList.remove('hidden');
-  document.getElementById('drawer').classList.add('open');
-}
-function closeDrawer() { document.getElementById('drawer').classList.remove('open'); }
-function closeReader() {
-  closeDrawer();
-  if (state.selectedId) state.readerDismissedFor = state.selectedId;
-  if (state.find.open) document.getElementById('find-input').focus();
-}
-function toggleReaderWidth() {
-  const drawer = document.getElementById('drawer');
-  drawer.classList.toggle('wide');
-  const btn = drawer.querySelector('.reader-expand');
-  if (btn) btn.textContent = drawer.classList.contains('wide') ? '⤡' : '⤢';
-  if (state.selectedId) centerOn(state.selectedId);
 }
 
 function metaItem(k, v) {
@@ -1181,68 +1596,40 @@ function renderReport(text) {
     return el('pre', { class: 'report' }, [String(text)]);
   }
 }
-let readerSig = null;
-function renderReader() {
-  const drawer = document.getElementById('drawer');
-  const id = state.selectedId;
-  if (!id || !state.tasks.has(id) || state.readerDismissedFor === id) {
-    drawer.classList.remove('open');
-    if (!id || !state.tasks.has(id)) readerSig = null;
-    return;
-  }
-  const t = state.tasks.get(id);
-  const sig = [id, t.reportAt, t.state, (t.report || '').length,
-    state.run.id === id ? (state.run.pending ? 'pending' : state.run.error || '') : '',
-    awakeCount(), state.situation ? 1 : 0, state.submitting ? 1 : 0, state.error ? 1 : 0].join('|');
-  if (sig === readerSig && drawer.classList.contains('open')) return;
-  readerSig = sig;
-
-  const pane = document.getElementById('detail');
-  const prev = pane.querySelector('.detail-body');
-  const scroll = prev ? prev.scrollTop : 0;
-  pane.innerHTML = '';
-
+function reportSnippet(text) {
+  const clean = String(text)
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[#>*_`~\-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return clean.length > 240 ? `${clean.slice(0, 240).trimEnd()}…` : clean;
+}
+function taskDetailsNode(t) {
+  const wrap = el('div', { class: 'task-details', 'data-details-id': t.id, 'data-focus-key': `details-node:${t.id}`, tabindex: '-1' });
   const status = reportStatus(t);
-  const runBtn = el('button', { class: 'btn tiny reader-run', title: runBlockedReason(t) }, ['▶ Run']);
+  const runBtn = el('button', { class: 'btn tiny detail-run', type: 'button', title: runBlockedReason(t), 'data-focus-key': `run:${t.id}` }, ['▶ Run']);
   runBtn.disabled = !canRunTask(t);
-  if (state.run.id === id && state.run.pending) runBtn.textContent = 'starting…';
-  runBtn.addEventListener('click', () => runTask(id));
-  const header = el('header', {}, [
-    el('div', { class: 'detail-title' }, [
-      el('span', { class: 'name', text: t.title }),
-      el('span', { class: `badge kind-${t.kind}`, text: t.kind }),
-      el('span', { class: `badge ${status.cls}`, text: status.label }),
-    ]),
-    el('div', { class: 'actions' }, [
-      runBtn,
-      el('button', { class: 'btn tiny reader-expand', title: 'Expand reader', onclick: toggleReaderWidth }, ['⤢']),
-      el('button', { class: 'btn tiny', title: 'Close', onclick: closeReader }, ['✕']),
-    ]),
-  ]);
-
-  const body = el('div', { class: 'detail-body', tabindex: '-1' });
-  if (state.run.id === id && (state.run.pending || state.run.error)) {
-    body.append(el('div', {
+  if (state.run.id === t.id && state.run.pending) runBtn.textContent = 'starting…';
+  runBtn.addEventListener('click', () => runTask(t.id));
+  wrap.append(el('div', { class: 'detail-title' }, [
+    el('span', { class: 'name', text: t.title }),
+    el('span', { class: `badge kind-${t.kind}`, text: t.kind }),
+    el('span', { class: `badge ${status.cls}`, text: status.label }),
+    el('span', { class: 'report-spacer' }),
+    runBtn,
+  ]));
+  if (state.run.id === t.id && (state.run.pending || state.run.error)) {
+    wrap.append(el('div', {
       class: `run-note${state.run.error ? ' error' : ''}`,
       text: state.run.pending ? 'starting…' : `failed: ${state.run.error}`,
     }));
   }
-  body.append(el('div', { class: 'meta-grid' }, [
+  wrap.append(el('div', { class: 'details-grid' }, [
     metaItem('State', t.state),
     metaItem('TTL', `${t.ttl}m`),
-    metaItem('Report age', t.reportAt ? relTime(t.reportAt) : '—'),
-    metaItem('Dependencies', t.deps.length),
+    metaItem('Report', t.reportAt ? `${relTime(t.reportAt)} · ${reportSizeLabel((t.report || '').length)}` : 'none'),
   ]));
-  if (t.report) {
-    const pct = Math.round(freshness(t) * 100);
-    const bar = el('div', { class: 'freshbar' }, [el('i', { style: `width:${pct}%` })]);
-    body.append(el('div', { class: 'meta' }, [
-      el('span', { class: 'k', text: 'freshness' }),
-      el('span', { class: 'v', text: `${pct}% of ${t.ttl}m` }),
-      bar,
-    ]));
-  }
-  body.append(el('div', { class: 'section' }, [
+  wrap.append(el('div', { class: 'section' }, [
     el('h3', { text: 'Instruction' }),
     el('div', { class: 'instruction', text: t.instruction || '(none)' }),
   ]));
@@ -1252,32 +1639,434 @@ function renderReader() {
     const exists = state.tasks.has(d);
     depWrap.append(el('button', {
       class: `dep${exists ? '' : ' unresolved'}`,
-      title: exists ? `Go to ${d}` : 'Not in the network',
-      onclick: exists ? () => jumpTo(d) : null,
+      type: 'button',
+      title: exists ? `Open ${d}` : 'Not in the network',
+      'data-focus-key': `dep:${d}`,
+      onclick: exists ? () => activateTask(d) : null,
     }, [d]));
   }
-  body.append(el('div', { class: 'section' }, [el('h3', { text: 'Dependencies' }), depWrap]));
-  const prevRun = t.state === 'awake' && !!t.report;
-  body.append(el('div', { class: 'section' }, [
-    el('h3', { text: prevRun ? 'Report · previous run' : 'Report' }),
-    t.report ? renderReport(t.report) : el('div', {
-      class: 'empty-note',
-      text: t.state === 'awake' ? 'Working — no report yet' : 'No report yet',
-    }),
-  ]));
-  pane.append(header, body);
-  openDrawer();
-  body.scrollTop = scroll;
+  wrap.append(el('div', { class: 'section' }, [el('h3', { text: 'Dependencies' }), depWrap]));
+  return wrap;
 }
-function jumpTo(id) {
-  selectNode(id);
+function liveCardNode() {
+  return el('div', { id: 'live', class: 'live-card hidden' }, [
+    el('div', { id: 'live-head' }, [el('span', { id: 'live-task' }), el('span', { id: 'live-meta' })]),
+    el('div', { id: 'live-tail' }, [el('span', { id: 'live-text' }), el('span', { id: 'live-caret', text: '▍' })]),
+  ]);
 }
+function feedTasks() {
+  if (!state.activeRootId) return [];
+  return [...getClosure(state.activeRootId)].map(id => state.tasks.get(id)).filter(Boolean);
+}
+function renderRootDeps(root, tasks) {
+  const box = document.getElementById('root-deps');
+  if (!box) return;
+  const awake = tasks.find(t => t.state === 'awake') || null;
+  const deps = (root.deps || []).map(id => state.tasks.get(id)).filter(Boolean);
+  const activeId = awake && deps.length
+    ? (deps.some(d => d.id === awake.id)
+      ? awake.id
+      : ((deps.find(d => getClosure(d.id).has(awake.id)) || {}).id || null))
+    : null;
+  if (!awake || !deps.length) {
+    if (!box.classList.contains('hidden')) {
+      box.classList.add('hidden');
+      box.replaceChildren();
+    }
+    state.rootDepsSig = null;
+    return;
+  }
+  const sig = `${root.id}::${awake.id}::${activeId || ''}::${deps.map(d => `${d.id}|${d.state}|${d.reportAt || ''}`).join('~')}`;
+  if (sig === state.rootDepsSig) return;
+  state.rootDepsSig = sig;
+  const focused = document.activeElement;
+  const focusKey = focused && focused.dataset ? focused.dataset.focusKey : null;
+  box.classList.remove('hidden');
+  box.replaceChildren();
+  for (const d of deps) {
+    const active = d.id === activeId;
+    const cls = ['dep-box', `state-${d.state}`];
+    if (active) cls.push('active');
+    if (d.report && d.state === 'sleeping') cls.push('reported');
+    const stateLabel = d.id === awake.id ? 'running' : active ? 'branch running' : d.state === 'failing' ? 'failing' : d.report ? 'reported' : 'pending';
+    const label = `${d.title} · ${stateLabel}`;
+    const btn = el('button', {
+      class: cls.join(' '),
+      type: 'button',
+      'data-focus-key': `depbox:${d.id}`,
+      title: label,
+      'aria-label': label,
+    }, [
+      el('span', { class: 'dep-dot' }),
+      el('span', { class: 'dep-box-title', text: d.title }),
+    ]);
+    btn.addEventListener('click', () => activateTask(d.id));
+    box.append(btn);
+  }
+  if (focusKey && focusKey.startsWith('depbox:')) {
+    const next = box.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`);
+    if (next) next.focus({ preventScroll: true });
+  }
+}
+function renderRunHeader(root, tasks) {
+  const header = document.getElementById('root-header');
+  if (!root) {
+    header.classList.add('hidden');
+    const deps = document.getElementById('root-deps');
+    if (deps) { deps.classList.add('hidden'); deps.replaceChildren(); }
+    state.rootDepsSig = null;
+    return;
+  }
+  header.classList.remove('hidden');
+  const title = document.getElementById('root-title');
+  title.textContent = root.title;
+  const instruction = document.getElementById('root-instruction');
+  instruction.textContent = root.instruction || '';
+  instruction.title = root.instruction || '';
+  const reported = tasks.filter(t => !!t.report).length;
+  const failing = tasks.filter(t => t.state === 'failing').length;
+  const awake = tasks.filter(t => t.state === 'awake').length;
+  const latest = tasks.reduce((max, t) => {
+    const at = t.reportAt ? Date.parse(t.reportAt) : NaN;
+    return isFinite(at) && at > max ? at : max;
+  }, 0);
+  const meta = document.getElementById('root-meta');
+  meta.replaceChildren();
+  const bits = [`${reported}/${tasks.length} reported`];
+  if (failing) bits.push({ text: `${failing} failing`, cls: 'fail' });
+  if (awake) bits.push({ text: 'running', cls: 'awake' });
+  if (awake) {
+    const task = tasks.find(t => t.state === 'awake');
+    const start = state.awakeSince.get(task.id) || state.stream.startedAt || Date.now();
+    bits.push(fmtDuration(Date.now() - start));
+  } else if (latest) {
+    bits.push(`last report ${relTime(new Date(latest).toISOString())}`);
+  } else {
+    bits.push('no reports yet');
+  }
+  bits.forEach((b, i) => {
+    if (i) meta.append(document.createTextNode(' · '));
+    meta.append(typeof b === 'string' ? document.createTextNode(b) : el('span', { class: b.cls, text: b.text }));
+  });
+  const done = tasks.filter(t => t.state === 'sleeping' && t.report).length;
+  const pending = tasks.length - done - awake - failing;
+  const total = tasks.length || 1;
+  const bar = document.getElementById('root-bar');
+  bar.replaceChildren();
+  for (const [cls, n] of [['done', done], ['awake', awake], ['failing', failing], ['pending', pending]]) {
+    if (n > 0) bar.append(el('i', { class: `root-seg ${cls}`, style: `width:${(n / total) * 100}%` }));
+  }
+  renderRootDeps(root, tasks);
+}
+function rootListSig(roots) {
+  return roots.map(r => {
+    const closure = [...getClosure(r.id)].map(id => state.tasks.get(id)).filter(Boolean);
+    const reported = closure.filter(t => !!t.report).length;
+    const latest = closure.reduce((max, t) => {
+      const at = t.reportAt ? Date.parse(t.reportAt) : NaN;
+      return isFinite(at) && at > max ? at : max;
+    }, 0);
+    const unread = [...state.unread.keys()].filter(id => rootOwning(id) === r.id).length;
+    return `${r.id}|${r.title}|${rootActivity(r)}|${r.instruction.length}|${reported}/${closure.length}|${latest}|${unread}`;
+  }).join('~') + (state.tempRoot ? '~tmp' : '');
+}
+function renderRootList(roots) {
+  const body = document.getElementById('run-body');
+  const sig = rootListSig(roots);
+  if (state.rootListSig === sig && body.dataset.mode === 'list') return;
+  state.rootListSig = sig;
+  body.dataset.mode = 'list';
+  body.replaceChildren();
+  if (!roots.length) {
+    body.append(el('div', { class: 'run-empty' }, [
+      el('h2', { text: 'No tasks yet' }),
+      el('p', { text: 'Describe a root task below to start the network.' }),
+    ]));
+    return;
+  }
+  const ordered = [...roots].sort((a, b) => {
+    const rank = t => rootActivity(t) === 'awake' ? 0 : rootActivity(t) === 'failing' ? 1 : 2;
+    const ra = rank(a), rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    const ta = a.reportAt ? Date.parse(a.reportAt) : 0;
+    const tb = b.reportAt ? Date.parse(b.reportAt) : 0;
+    if (tb !== ta) return tb - ta;
+    return a.title.localeCompare(b.title);
+  });
+  const list = el('div', { class: 'root-list' });
+  if (state.tempRoot) {
+    list.append(el('div', { class: 'root-row temp' }, [
+      el('span', { class: 'root-dot awake' }),
+      el('span', {}, [
+        el('span', { class: 'r-title', text: state.tempRoot.label || 'submitting…' }),
+        el('span', { class: 'r-sub', text: 'waiting for the engine' }),
+      ]),
+      el('span', { class: 'r-meta', text: 'submitting' }),
+    ]));
+  }
+  for (const r of ordered) {
+    const tasks = [...getClosure(r.id)].map(id => state.tasks.get(id)).filter(Boolean);
+    const reported = tasks.filter(t => !!t.report).length;
+    const unread = [...state.unread.keys()].filter(id => rootOwning(id) === r.id).length;
+    const act = rootActivity(r);
+    const dot = act;
+    const latest = tasks.reduce((max, t) => {
+      const at = t.reportAt ? Date.parse(t.reportAt) : NaN;
+      return isFinite(at) && at > max ? at : max;
+    }, 0);
+    const meta = [];
+    meta.push(`${reported}/${tasks.length}`);
+    if (latest) meta.push(relTime(new Date(latest).toISOString()));
+    else meta.push('no reports');
+    const row = el('button', { class: 'root-row', type: 'button', 'data-focus-key': `root:${r.id}` }, [
+      el('span', { class: `root-dot ${dot}` }),
+      el('span', {}, [
+        el('span', { class: 'r-title', text: r.title }),
+        el('span', { class: 'r-sub', text: r.instruction || '(no instruction)' }),
+      ]),
+      el('span', { class: 'r-meta' }, [
+        el('span', { class: 'r-meta-line', text: meta.join(' · ') }),
+        el('span', { class: 'r-meta-line', text: act === 'awake' ? 'running' : act === 'failing' ? 'failing' : act === 'reported' ? 'reported' : 'idle' }),
+        unread ? el('span', { class: 'r-unread', text: `${unread} new` }) : null,
+      ]),
+    ]);
+    row.addEventListener('click', () => {
+      setActiveRoot(r.id, true);
+      state.activeRootId = r.id;
+      state.mode = 'run';
+      render();
+      requestAnimationFrame(() => {
+        const titles = [...document.querySelectorAll('.report-title')];
+        const target = titles[titles.length - 1] || document.querySelector('.task-details');
+        if (target) target.focus({ preventScroll: true });
+        else document.getElementById('composer-input').focus();
+      });
+    });
+    list.append(row);
+  }
+  body.append(list);
+}
+function captureFeedAnchor() {
+  const sc = document.getElementById('run-scroll');
+  if (!sc) return null;
+  const top = sc.getBoundingClientRect().top;
+  const card = [...sc.querySelectorAll('[data-report-id]')].find(n => n.getBoundingClientRect().bottom > top + 1);
+  if (!card) return null;
+  return { id: card.dataset.reportId, offset: card.getBoundingClientRect().top - top };
+}
+function restoreFeedAnchor(anchor) {
+  if (!anchor) return;
+  const sc = document.getElementById('run-scroll');
+  const card = sc && [...sc.querySelectorAll('[data-report-id]')].find(n => n.dataset.reportId === anchor.id);
+  if (!card) return;
+  const delta = (card.getBoundingClientRect().top - sc.getBoundingClientRect().top) - anchor.offset;
+  if (Math.abs(delta) > 1) sc.scrollTop += delta;
+}
+function renderFeed(root, tasks) {
+  const body = document.getElementById('run-body');
+  const reports = tasks.filter(t => !!t.report).sort((a, b) => {
+    const ta = a.reportAt ? Date.parse(a.reportAt) : -Infinity;
+    const tb = b.reportAt ? Date.parse(b.reportAt) : -Infinity;
+    const va = isFinite(ta) ? ta : -Infinity;
+    const vb = isFinite(tb) ? tb : -Infinity;
+    if (va !== vb) return va - vb;
+    return a.title.localeCompare(b.title);
+  });
+  const sig = [
+    state.activeRootId || '',
+    reports.map(t => `${t.id}|${t.state}|${t.reportAt || ''}|${(t.report || '').length}`).join('~'),
+    [...state.unread.keys()].filter(id => tasks.some(t => t.id === id)).sort().join(','),
+    [...state.expandedReports].filter(id => tasks.some(t => t.id === id)).sort().join(','),
+    state.detailsTaskId || '',
+    tasks.filter(t => t.state === 'awake').map(t => t.id).join(','),
+    tasks.filter(t => t.state === 'failing' && !t.report).map(t => t.id).join(','),
+    (() => {
+      const dt = state.detailsTaskId ? state.tasks.get(state.detailsTaskId) : null;
+      return dt ? `${dt.state}|${dt.reportAt || ''}|${dt.instruction.length}|${dt.deps.join(',')}|${dt.ttl}` : '';
+    })(),
+    `${state.run.id || ''}|${state.run.pending ? 1 : 0}|${state.run.error || ''}`,
+    state.tempRoot ? 'tmp' : '',
+  ].join('::');
+  const header = document.getElementById('root-header');
+  renderRunHeader(root, tasks);
+  if (sig === state.reportSig && body.dataset.mode === 'feed') {
+    state.followBottom = false;
+    return;
+  }
+  state.reportSig = sig;
+  body.dataset.mode = 'feed';
+  const focus = document.activeElement;
+  const focusKey = focus && focus.dataset ? focus.dataset.focusKey : null;
+  const anchor = captureFeedAnchor();
+  const follow = state.followBottom;
+  state.followBottom = false;
 
+  const frag = document.createDocumentFragment();
+  const awake = tasks.find(t => t.state === 'awake');
+
+  const unreadIn = reports.filter(t => state.unread.has(t.id));
+  const newBar = document.getElementById('root-new');
+  const newBtn = document.getElementById('root-new-btn');
+  let jumpTargetId = null;
+  if (newBar && newBtn) {
+    newBar.classList.toggle('hidden', !unreadIn.length);
+    if (unreadIn.length) {
+      jumpTargetId = unreadIn[0].id;
+      const count = `${unreadIn.length} new report${unreadIn.length === 1 ? '' : 's'}`;
+      newBtn.textContent = count;
+      newBtn.setAttribute('aria-label', `Jump to the first of ${count}`);
+      newBtn.onclick = () => {
+        const id = unreadIn[0].id;
+        state.expandedReports.add(id);
+        markSeen(id);
+        render();
+        scrollToReport(id);
+      };
+    }
+  }
+
+  if (reports.length) frag.append(el('div', { class: 'feed-kicker' }, [el('span', { text: 'Reports' }), el('span', { text: 'latest last' })]));
+
+  for (const t of reports) {
+    const expanded = state.expandedReports.has(t.id);
+    const unread = state.unread.has(t.id);
+    const card = el('article', {
+      class: `report-card${unread ? ' unread' : ''}`,
+      'data-report-id': t.id,
+    });
+    const head = el('header', { class: 'report-head' });
+    const title = el('button', {
+      class: 'report-title',
+      type: 'button',
+      'data-focus-key': `title:${t.id}`,
+      'aria-expanded': String(expanded),
+      title: expanded ? 'Collapse report' : 'Expand report',
+    }, [t.title]);
+    title.addEventListener('click', () => {
+      if (state.expandedReports.has(t.id)) state.expandedReports.delete(t.id);
+      else { state.expandedReports.add(t.id); markSeen(t.id); }
+      render();
+    });
+    head.append(title);
+    head.append(el('span', { class: 'report-time', text: t.reportAt ? relTime(t.reportAt) : 'no timestamp' }));
+    if (unread) head.append(el('span', { class: 'report-new', text: 'NEW' }));
+    if (t.kind === 'root') head.append(el('span', { class: 'report-marker root', text: 'root' }));
+    if (t.state === 'awake') head.append(el('span', { class: 'report-marker prev', text: 'previous run' }));
+    if (t.state === 'failing') head.append(el('span', { class: 'report-marker failing', text: 'failing' }));
+    head.append(el('span', { class: 'report-spacer' }));
+    const toggle = el('button', {
+      class: 'report-toggle',
+      type: 'button',
+      'data-focus-key': `toggle:${t.id}`,
+      'aria-expanded': String(expanded),
+    }, [expanded ? 'less' : 'more']);
+    toggle.addEventListener('click', () => {
+      if (state.expandedReports.has(t.id)) state.expandedReports.delete(t.id);
+      else { state.expandedReports.add(t.id); markSeen(t.id); }
+      render();
+    });
+    head.append(toggle);
+    card.append(head);
+
+    if (expanded) {
+      const bodyEl = el('div', { class: 'report-body' }, [renderReport(t.report)]);
+      card.append(bodyEl);
+    } else {
+      card.append(el('div', { class: 'report-body snippet', text: reportSnippet(t.report) }));
+    }
+    const actions = el('div', { class: 'report-actions' }, [
+      el('button', {
+        class: 'btn tiny',
+        type: 'button',
+        'data-focus-key': `details:${t.id}`,
+        'aria-expanded': String(state.detailsTaskId === t.id),
+        onclick: () => {
+          state.detailsTaskId = state.detailsTaskId === t.id ? null : t.id;
+          render();
+          if (state.detailsTaskId) focusDetails(t.id);
+        },
+      }, [state.detailsTaskId === t.id ? 'Hide details' : 'Details']),
+    ]);
+    card.append(actions);
+    if (state.detailsTaskId === t.id) card.append(taskDetailsNode(t));
+    frag.append(card);
+  }
+
+  const failed = tasks.filter(t => t.state === 'failing' && !t.report);
+  for (const t of failed) {
+    const row = el('div', { class: 'failure-row', 'data-report-id': t.id }, [
+      el('span', { text: '✕' }),
+      el('span', { class: 'task', text: t.title }),
+      el('span', { text: 'failed · no report' }),
+      el('span', { class: 'report-spacer' }),
+      el('button', {
+        class: 'btn tiny',
+        type: 'button',
+        'data-focus-key': `failure:${t.id}`,
+        onclick: () => { state.detailsTaskId = state.detailsTaskId === t.id ? null : t.id; render(); },
+      }, [state.detailsTaskId === t.id ? 'Hide details' : 'Details']),
+    ]);
+    frag.append(row);
+    if (state.detailsTaskId === t.id) frag.append(taskDetailsNode(t));
+  }
+
+  if (!reports.length && !failed.length && !state.detailsTaskId && tasks.length) {
+    frag.append(el('div', { class: 'run-empty' }, [
+      el('h2', { text: 'No reports yet' }),
+      el('p', { text: 'Reports appear here as tasks finish.' }),
+    ]));
+  }
+  if (state.detailsTaskId) {
+    const t = state.tasks.get(state.detailsTaskId);
+    if (t && !t.report && t.state !== 'failing') frag.append(taskDetailsNode(t));
+  }
+  if (awake) frag.append(liveCardNode());
+
+  body.replaceChildren(frag);
+  tickLive();
+  const sc = document.getElementById('run-scroll');
+  if (state.feedReset || follow) {
+    if (sc) sc.scrollTop = sc.scrollHeight;
+    state.feedReset = false;
+  } else {
+    restoreFeedAnchor(anchor);
+  }
+  if (focusKey) {
+    const next = body.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`);
+    if (next) next.focus({ preventScroll: true });
+  }
+  if (jumpTargetId) paintJumpDirection(jumpTargetId, unreadIn.length);
+}
+function paintJumpDirection(id, count) {
+  const btn = document.getElementById('root-new-btn');
+  const view = document.getElementById('run-scroll');
+  if (!btn || !view) return;
+  const target = document.querySelector(`[data-report-id="${CSS.escape(id)}"]`);
+  let arrow = '';
+  if (target) {
+    const card = target.getBoundingClientRect();
+    const box = view.getBoundingClientRect();
+    if (card.top < box.top + 1) arrow = '↑';
+    else if (card.top > box.bottom - 1) arrow = '↓';
+  }
+  const label = `${count} new report${count === 1 ? '' : 's'}`;
+  btn.textContent = arrow ? `${arrow} ${label}` : label;
+}
+function renderRun() {
+  if (!state.activeRootId) {
+    document.getElementById('root-header').classList.add('hidden');
+    renderRootList(getRoots());
+    return;
+  }
+  const root = state.tasks.get(state.activeRootId);
+  if (!root) { setActiveRoot(null); renderRootList(getRoots()); return; }
+  renderFeed(root, feedTasks());
+}
 async function runTask(id) {
   const t = state.tasks.get(id);
   if (!t || !canRunTask(t)) return;
   state.run = { id, pending: true, error: null };
-  renderReader();
+  render();
   try {
     const env = await submitRoot(t.title, new AbortController().signal);
     state.run = { id: null, pending: false, error: null };
@@ -1285,10 +2074,24 @@ async function runTask(id) {
     refresh();
   } catch (e) {
     state.run = { id, pending: false, error: String(e) };
-    renderReader();
+    render();
   }
 }
-
+function activateNewestUnread() {
+  const id = newestUnreadId();
+  if (!id) return;
+  const root = rootOwning(id);
+  if (!root) return;
+  if (state.find.open) closeFind(false);
+  setActiveRoot(root, true);
+  state.activeRootId = root;
+  state.detailsTaskId = null;
+  state.expandedReports.add(id);
+  markSeen(id);
+  state.mode = 'run';
+  render();
+  scrollToReport(id);
+}
 async function submitRoot(instr, sig) {
   const res = await fetch(TASKS_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ task: instr }), signal: sig });
   if (!res.ok) throw new Error(String(res.status));
@@ -1331,17 +2134,14 @@ function goToMatch(dir) {
   if (!m.length) { paint(); return; }
   state.find.index = (state.find.index + dir + m.length) % m.length;
   const id = m[state.find.index];
-  const root = rootOwning(id);
-  if (root && !state.find.open) state.focusRootId = root;
-  const relaid = render();
-  if (!relaid) centerOn(id);
+  render();
+  centerOn(id);
   paintFind();
 }
 function currentMatchId() {
   return state.find.matches[state.find.index] || null;
 }
 
-document.getElementById('brand').onclick = clearSelection;
 const composerInput = document.getElementById('composer-input');
 composerInput.addEventListener('input', e => {
   if (baseComposerMode() === 'review') {
@@ -1350,11 +2150,59 @@ composerInput.addEventListener('input', e => {
   } else {
     state.taskDraft = e.target.value;
     state.submitError = null;
+    state.suggestDismissed = false;
+    state.suggestIndex = -1;
   }
   growComposer(e.target);
   renderComposer();
 });
+composerInput.addEventListener('focus', () => {
+  state.suggestDismissed = false;
+  state.suggestRenderSig = null;
+  renderSuggest();
+});
+composerInput.addEventListener('blur', () => {
+  setTimeout(() => {
+    if (document.activeElement !== composerInput) {
+      state.suggestOpen = false;
+      state.suggestItems = [];
+      state.suggestIndex = -1;
+      state.suggestRenderSig = null;
+      renderSuggest();
+    }
+  }, 0);
+});
 composerInput.addEventListener('keydown', e => {
+  if (state.suggestOpen) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const n = state.suggestItems.length;
+      if (!n) return;
+      const dir = e.key === 'ArrowDown' ? 1 : -1;
+      state.suggestIndex = state.suggestIndex < 0
+        ? (dir > 0 ? 0 : n - 1)
+        : (state.suggestIndex + dir + n) % n;
+      state.suggestRenderSig = null;
+      renderSuggest();
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      state.suggestDismissed = true;
+      state.suggestIndex = -1;
+      state.suggestRenderSig = null;
+      renderSuggest();
+      return;
+    }
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && state.suggestIndex >= 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      const item = state.suggestItems[state.suggestIndex];
+      if (item) chooseSuggestion(item.title);
+      return;
+    }
+  }
   if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
   e.preventDefault();
   composerSubmit();
@@ -1397,42 +2245,97 @@ async function submitTask() {
   state.submitting = true;
   state.submitError = null;
   state.tempRoot = { label: 'submitting…' };
-  state.tempBaseline = new Set(getRoots().map(r => r.id));
-  state.focusRootId = null;
-  state.selectedId = null;
+  const baseline = new Set(getRoots().map(r => r.id));
+  state.tempBaseline = baseline;
+  state.activeRootId = null;
+  state.rootPinned = false;
   render();
   try {
     const env = await submitRoot(instr, new AbortController().signal);
     state.taskDraft = '';
     state.submitting = false;
+    state.tempRoot = null;
+    state.tempBaseline = null;
     applyEnvelope(env);
+    const newRoot = getRoots().find(r => !baseline.has(r.id));
+    if (newRoot) {
+      setActiveRoot(newRoot.id, true);
+      state.activeRootId = newRoot.id;
+      render();
+    }
     refresh();
   } catch (e) {
     state.submitting = false;
     state.tempRoot = null;
+    state.tempBaseline = null;
     state.submitError = String(e);
     render();
   }
 }
 
-function openFind() {
-  if (!state.find.open) state.find.returnFocus = state.focusRootId;
-  document.getElementById('findbar').classList.remove('hidden');
-  state.find.open = true;
-  document.getElementById('find-input').focus();
+function setMode(mode) {
+  if (mode === 'sandbox' && state.mode !== 'sandbox') {
+    state.sandboxReturn = state.mode;
+    const frame = document.getElementById('sandbox-frame');
+    if (!frame.dataset.loaded) {
+      frame.dataset.loaded = '1';
+      frame.src = SANDBOX_URL;
+    }
+  }
+  if (state.find.open && mode !== 'map') closeFind(false);
+  const panelHadFocus = state.mode === 'run' && document.getElementById('run').contains(document.activeElement);
+  if (panelHadFocus && mode === 'map') document.getElementById('mode-map').focus({ preventScroll: true });
+  state.mode = mode;
   render();
+  if (mode === 'map') {
+    requestAnimationFrame(() => { if (state.layout && state.layout.bounds) fit(); });
+  }
 }
-function closeFind() {
+document.getElementById('mode-run').onclick = () => setMode('run');
+document.getElementById('run-close').onclick = () => setMode('map');
+document.getElementById('mode-map').onclick = () => setMode('map');
+document.getElementById('mode-sandbox').onclick = () => setMode('sandbox');
+document.getElementById('root-select').addEventListener('change', e => {
+  const id = e.target.value || null;
+  if (id && !state.tasks.has(id)) return;
+  state.rootPinned = true;
+  setActiveRoot(id, true);
+  state.activeRootId = id;
+  if (state.find.open) state.find.returnRoot = id;
+  render();
+});
+document.getElementById('unread-reports').onclick = activateNewestUnread;
+document.getElementById('brand').onclick = goHome;
+document.getElementById('brand').addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goHome(); }
+});
+function openFind() {
+  if (state.mode === 'sandbox') return;
+  if (state.find.open) { document.getElementById('find-input').focus(); return; }
+  state.find.returnMode = state.mode;
+  state.find.returnRoot = state.activeRootId;
+  state.mode = 'map';
+  state.find.open = true;
+  state.find.query = '';
+  document.getElementById('find-input').value = '';
+  document.getElementById('findbar').classList.remove('hidden');
+  render();
+  document.getElementById('find-input').focus();
+}
+function closeFind(restore = true) {
   document.getElementById('findbar').classList.add('hidden');
   const input = document.getElementById('find-input');
   input.value = '';
   input.blur();
-  const back = state.find.returnFocus;
-  state.find = { open: false, query: '', matches: [], index: 0, returnFocus: null };
-  state.focusRootId = back && state.tasks.has(back) ? back : null;
+  const backMode = state.find.returnMode;
+  const backRoot = state.find.returnRoot;
+  state.find = { open: false, query: '', matches: [], index: 0, returnMode: 'run', returnRoot: null };
+  if (!restore) return;
+  state.mode = backMode === 'map' ? 'map' : 'run';
+  if (!state.situation && backRoot && state.tasks.has(backRoot)) state.activeRootId = backRoot;
   render();
 }
-document.getElementById('find-close').onclick = closeFind;
+document.getElementById('find-close').onclick = () => closeFind();
 document.getElementById('find-input').addEventListener('input', e => {
   state.find.query = e.target.value;
   recomputeFind(true);
@@ -1443,7 +2346,7 @@ document.getElementById('find-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') {
     e.preventDefault();
     const id = currentMatchId();
-    if (id) selectNode(id, true);
+    if (id) activateTask(id);
     return;
   }
   if (!has) return;
@@ -1454,33 +2357,26 @@ document.getElementById('find-input').addEventListener('keydown', e => {
 document.getElementById('find-prev').onclick = () => goToMatch(-1);
 document.getElementById('find-next').onclick = () => goToMatch(1);
 document.addEventListener('keydown', e => {
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); openFind(); return; }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+    if (state.mode === 'sandbox') return;
+    e.preventDefault();
+    openFind();
+    return;
+  }
   if (e.key === 'Escape') {
-    if (state.find.open && readerVisible()) { closeReader(); return; }
     if (state.find.open) { closeFind(); return; }
-    if (readerVisible()) { closeReader(); return; }
+    if (state.mode === 'run') { setMode('map'); return; }
+    if (state.mode === 'sandbox') { setMode(state.sandboxReturn || 'map'); return; }
     return;
   }
   const a = document.activeElement, tag = a && a.tagName;
   const typing = tag === 'INPUT' || tag === 'TEXTAREA' || (a && a.isContentEditable);
   if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey) {
-    if (typing) return;
+    if (typing || state.mode === 'sandbox') return;
     e.preventDefault();
     openFind();
-    return;
-  }
-  if (e.key === 'Enter' && state.selectedId && !e.metaKey && !e.ctrlKey && !e.altKey) {
-    if (typing || tag === 'BUTTON' || tag === 'A') return;
-    if (e.target.closest && e.target.closest('#drawer')) return;
-    if (readerVisible()) return;
-    e.preventDefault();
-    state.readerDismissedFor = null;
-    render();
-    const body = document.querySelector('#detail .detail-body');
-    if (body) body.focus({ preventScroll: true });
   }
 });
-
 /* ---- live output stream ---- */
 let streamAbort = null, streamRetryTimer = null, streamBackoff = 1000;
 
@@ -1716,38 +2612,56 @@ function updateNodeActivity(level) {
   });
 }
 function tickLive() {
-  const s = state.stream;
-  const live = document.getElementById('live');
-  const busy = baseComposerMode() === 'busy';
-  const active = s.status === 'open' || s.status === 'connecting' || s.status === 'ended';
-  const show = busy && active && !!s.task;
-  live.classList.toggle('hidden', !show);
-  if (!show) { updateNodeActivity(0); return; }
-
   const now = Date.now();
+  const s = state.stream;
+  const awake = currentAwakeTask();
+  const closure = state.activeRootId ? getClosure(state.activeRootId) : null;
+  const inRoot = !!(awake && closure && closure.has(awake.id));
+  const active = s.status === 'open' || s.status === 'connecting' || s.status === 'ended';
+
   s.chunkTimes = s.chunkTimes.filter(t => now - t < 3000);
   const instant = s.chunkTimes.filter(t => now - t < 1000).length;
   s.rate = s.rate * 0.7 + instant * 0.3;
-  updateNodeActivity(s.status === 'open' ? Math.min(1, s.rate / 8) : 0);
+  if (awake && inRoot && (state.mode === 'run' || state.mode === 'map')) {
+    updateNodeActivity(active ? Math.min(1, s.rate / 8) : 0);
+  } else {
+    updateNodeActivity(0);
+  }
 
-  const tail = filterTail(displayText(s.raw));
+  const live = document.getElementById('live');
+  const show = inRoot && state.mode === 'run' && !!live;
+  if (!show) {
+    if (live) live.classList.add('hidden');
+    return;
+  }
+  live.classList.remove('hidden');
+
+  const taskId = s.task || awake.id;
+  const header = document.getElementById('live-task');
+  const meta = document.getElementById('live-meta');
+  const text = document.getElementById('live-text');
+  const caret = document.getElementById('live-caret');
+  if (!header || !meta || !text || !caret) return;
+
+  const tail = active ? filterTail(displayText(s.raw)) : { text: '', droppedAfter: false };
   if (tail.text) { s.lastText = tail.text; s.lastTextAt = now; }
   s.toolOnly = tail.droppedAfter;
-  const display = (s.midTask ? '… ' : '') + (s.lastText || 'waiting for output…');
+  const display = !active ? 'waiting for output…' : (s.midTask ? '… ' : '') + (s.lastText || 'waiting for output…');
   if (display !== s.rendered) {
-    document.getElementById('live-text').textContent = display;
+    text.textContent = display;
     s.rendered = display;
     const box = document.getElementById('live-tail');
-    box.scrollTop = box.scrollHeight;
+    if (box) box.scrollTop = box.scrollHeight;
   }
 
   const age = s.lastChunkAt ? (now - s.lastChunkAt) / 1000 : null;
   const key = liveStatusKey(s, age);
-  document.getElementById('live-caret').classList.toggle('quiet', key !== 'streaming');
+  caret.classList.toggle('quiet', key !== 'streaming');
 
   if (now - s.headerAt >= 900) {
     s.headerAt = now;
     const labels = {
+      idle: 'waiting for output',
       connecting: 'connecting…',
       ended: 'stream ended · polling',
       waiting: 'waiting for output',
@@ -1755,9 +2669,8 @@ function tickLive() {
       quiet: 'quiet',
       stalled: `no output for ${Math.floor(age || 0)}s`,
     };
-    const elapsed = fmtDuration(now - (state.awakeSince.get(s.task) || s.startedAt || now));
-    document.getElementById('live-task').textContent = (s.midTask ? '… ' : '') + (s.task || '');
-    const meta = document.getElementById('live-meta');
+    const elapsed = fmtDuration(now - (state.awakeSince.get(taskId) || s.startedAt || now));
+    header.textContent = (s.midTask ? '… ' : '') + taskId;
     meta.dataset.status = key;
     const bits = [labels[key] || ''];
     if (s.toolOnly) bits.push('tool output');
@@ -1799,7 +2712,9 @@ const stageObserver = new ResizeObserver(entries => {
   if (Math.abs(h - stageHeight) < 80) return;
   stageHeight = h;
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => { if (state.layout && state.layout.bounds) fit(); }, 150);
+  resizeTimer = setTimeout(() => {
+    if (state.mode === 'map' && state.layout && state.layout.bounds) fit();
+  }, 150);
 });
 stageObserver.observe(document.getElementById('stage'));
 
@@ -1811,6 +2726,7 @@ window.addEventListener('pagehide', () => closeStream());
 setInterval(tickLive, 100);
 
 render();
+if (!document.getElementById('composer-input').disabled) document.getElementById('composer-input').focus({ preventScroll: true });
 refresh();
 poll();
 </script>
