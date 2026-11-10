@@ -16,24 +16,29 @@ services:
   runner:
     # image: ghcr.io/ggml-org/llama.cpp:server-b10454
     image: ghcr.io/ggml-org/llama.cpp:server-b11977
-    command: --no-mmproj
+    # command: --no-mmproj
     environment:
       # GGML_VK_DISABLE_F16: 1  # workaround to avoid gibberish output on Intel iGPUs (https://github.com/ggml-org/llama.cpp/issues/17106)
       LLAMA_ARG_HOST: 0.0.0.0
-      LLAMA_ARG_HF_REPO: unsloth/gemma-4-E4B-it-qat-GGUF:UD-Q4_K_XL
-      # LLAMA_ARG_HF_REPO: unsloth/NVIDIA-Nemotron-3.5-Bolt-E4B-GGUF:UD-Q4_K_XL
+      # LLAMA_ARG_HF_REPO: unsloth/gemma-4-E4B-it-qat-GGUF:UD-Q4_K_XL
+      LLAMA_ARG_HF_REPO: unsloth/NVIDIA-Nemotron-3.5-Bolt-E4B-GGUF:UD-Q4_K_XL
+      LLAMA_ARG_LOG_VERBOSITY: 3
+      LLAMA_ARG_JINJA: 1
       LLAMA_ARG_BATCH: 512
       # LLAMA_ARG_N_GPU_LAYERS: 0
       LLAMA_ARG_THREADS: 4
+      LLAMA_ARG_LOAD_MODE: mlock
       LLAMA_ARG_CACHE_TYPE_K: q8_0 
       LLAMA_ARG_CACHE_TYPE_v: q8_0
       LLAMA_ARG_FLASH_ATTN: on
+      LLAMA_ARG_MMPROJ_AUTO: 0
       LLAMA_ARG_CTX_SIZE: 32768
-      LLAMA_ARG_SPEC_TYPE: draft-mtp
+      LLAMA_ARG_SPEC_TYPE: draft-dflash   # draft-mtp|draft-dspark|draft-dflash
       LLAMA_ARG_SPEC_DRAFT_N_MAX: 1
       # LLAMA_ARG_CPU_MOE: on
       # LLAMA_ARG_N_CPU_MOE: 18
       LLAMA_ARG_REASONING: off  # on|off|auto
+      LLAMA_ARG_REASONING_PRESERVE: 0 # --no-reasoning-preserve  
     ports:
       - 127.0.0.1:9931:9931
     volumes:
