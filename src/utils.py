@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 import numpy
 import dspy
 import json
+import time
 from colorama import Fore, Style
 
 from src.log import log_internal_event, log_error
@@ -15,17 +16,17 @@ class Task:
     kind: str = field(metadata={"description": "The kind of task. Only kind 'simple' is allowed."})
     ttl: int = field(metadata={"description": "How long a report from this task should be considered valid, in minutes."})
 
-    # dependencies field allows the LLM to write coherent architectures
-    dependencies: list[str] = field(metadata={"description": "Titles of previous tasks that this task would benefit from knowing about."})
-    def __post_init__(self):
-        if self.dependencies is None:
-            self.dependencies = []
+    # # # # # dependencies field allows the LLM to write coherent architectures
+    # # # # dependencies: list[str] = field(metadata={"description": "Titles of previous tasks that this task would benefit from knowing about."})
+    # # # # def __post_init__(self):
+    # # # #     if self.dependencies is None:
+    # # # #         self.dependencies = []
 
 @dataclass
 class State:
     """The state of an Optimus instance"""
     filepath: str   # where to persist memory
-    tasks: list[Task]
+    tasks: dict[str, Task]
     qna: dict
     parent: str  # the parent task
     current: str # the current task
@@ -36,7 +37,42 @@ class State:
     resolution: str
     event: asyncio.Event
     tokens: asyncio.Queue
+    actions: asyncio.Queue
+    trajectory: list
     job: asyncio.Task
+
+# # # # class RecoveringReAct(dspy.ReAct):  
+# # # #     def __init__(self, signature, tools, max_iters=20):  
+# # # #         super().__init__(signature, tools, max_iters)  
+  
+# # # #         class _RecoveringPredict(dspy.Predict):  
+# # # #             def __init__(self, inner):  
+# # # #                 super().__init__(inner.signature)  
+# # # #                 # Adopt inner's state wholesale: lm, demos, config,  
+# # # #                 # fields, stage, traces, ...  
+# # # #                 self.__dict__.update(inner.__dict__)  
+  
+# # # #             def _recover(self, err):  
+# # # #                 return dspy.Prediction(  
+# # # #                     next_thought=f"Output failed to parse: {err}",  
+# # # #                     tool_calls=dspy.ToolCalls.from_dict_list(  
+# # # #                         [{"name": "__format_error__", "args": {}}]  
+# # # #                     ),  
+# # # #                 )  
+  
+# # # #             def forward(self, **kwargs):  
+# # # #                 try:  
+# # # #                     return super().forward(**kwargs)  
+# # # #                 except (AdapterParseError, ValueError) as err:  
+# # # #                     return self._recover(err)  
+  
+# # # #             async def aforward(self, **kwargs):  
+# # # #                 try:  
+# # # #                     return await super().aforward(**kwargs)  
+# # # #                 except (AdapterParseError, ValueError) as err:  
+# # # #                     return self._recover(err)  
+  
+# # # #         self.react = _RecoveringPredict(self.react)
 
 def prettify_chunk(chunk: dspy.streaming.StreamResponse):
     """Wrap a chunk with colors"""
@@ -74,13 +110,15 @@ async def stream_dspy_program(queues: list[asyncio.Queue], module: dspy.Module, 
     )
     # Run program=module+arguments and stream output fields
     try:
-        prediction = ""
+        prediction = dspy.Prediction(answer="")
         async for chunk in streamer(**kwargs):          # pass signature values to module inside streamer
             if isinstance(chunk, dspy.streaming.StreamResponse):
                 # when multi-output, chunk.signature_field_name is the name of the output that the chunk belongs to
+                pretty_chunk = prettify_chunk(chunk)
+                print(pretty_chunk, end="", flush=True)
+                # print(pretty_chunk, flush=True)
+                # print(type(chunk).__name__, time.monotonic(), flush=True)
                 for queue in queues:
-                    pretty_chunk = prettify_chunk(chunk)
-                    print(pretty_chunk, end="", flush=True)
                     await queue.put({"task": kwargs["task"]["title"], "data": chunk})
             elif isinstance(chunk, dspy.Prediction):      # the last chunk with final response is a Prediction
                 prediction = chunk
@@ -98,13 +136,17 @@ def require_approval(state: State, func, name):
             "parent": state.current.title,
             "tool": name,
             "args": kwargs,
-            "justification": state.justification
+            "justification": state.justification,
+            # "trajectory": state.trajectory          # trajectory so far
+            "trajectory": state.tasks[state.parent.title]["trajectory"]
         }
         log_internal_event(f"[SITUATION] {state.situation}")
         await state.event.wait()
         state.situation = {}
         state.event.clear()
-        if not state.resolution:    # No feedback from user
+        if not state.resolution:    # No feedback from user = approved
+            # state.trajectory += [state.justification]
+            state.tasks[state.parent.title]["trajectory"] += [state.justification]
             return await func(**kwargs)
         else:
             log_error(f"Tool '{name}' call denied: {kwargs}. Reason: {state.resolution}")

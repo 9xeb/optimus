@@ -34,17 +34,40 @@ async def health():
 @dataclass
 class TaskPayload():
     """Valid payload for POST requests at /tasks"""
-    task: str
+    task: str               # title of the task, used as key in the tasks database
+    dependencies: list[str]
+    tip: str = None         # optional additional user nudge
+
 @app.post("/tasks")
 async def create_task(task: TaskPayload):
-    """Submit task and store job"""
+    """Create a new task"""
+    result = optimus.plant(task=task.task, deps=task.dependencies)
+    if result is not None:
+        raise HTTPException(status_code=409, detail=result)
+
+@app.post("/tasks/{name}/run")
+async def run_task(name: str):
+    """Update a task and run it"""
     if optimus.state.job is not None and not optimus.state.job.done():
         # For now, only one concurrent root task is allowed
         raise HTTPException(status_code=409, detail="Optimus is busy with another root task.")
     else:
-        log_internal_event(f"Triggering Optimus")
-        optimus.state.job = asyncio.create_task(optimus.grow(task.task))
-        return {"status": "started"}
+        # log_internal_event(f"Triggering Optimus")
+        optimus.state.job = asyncio.create_task(optimus.grow(name))
+
+@app.put("/tasks")
+async def update_task(task: TaskPayload):
+    """Override dependencies and tip for a task"""
+    result = optimus.graft(task=task.task, deps=task.dependencies, tip=task.tip)
+    if result is not None:
+        raise HTTPException(status_code=404, detail=result)
+
+@app.delete("/tasks/{name}")
+async def delete_task(name: str):
+    """Delete a task"""
+    result = optimus.prune(name)
+    if result is not None:
+        raise HTTPException(status_code=404, detail=result)
 
 @app.get("/tasks/stream", response_class=EventSourceResponse)
 async def stream_tasks():
@@ -54,9 +77,11 @@ async def stream_tasks():
     else:
         # Pick up queue and start streaming all there is
         while True:
-            chunk = await optimus.state.tokens.get()
+            # chunk = await optimus.state.tokens.get()
+            chunk = await optimus.state.actions.get()
             if chunk:
-                yield ServerSentEvent(data=chunk["data"].chunk, event=chunk["task"])
+                # yield ServerSentEvent(data=chunk["data"].chunk, event=chunk["task"])
+                yield ServerSentEvent(data=chunk["data"], event=chunk["task"])
             else:
                 break
 
@@ -66,17 +91,18 @@ async def cancel_tasks():
     if optimus.state.job is None or optimus.state.job.done():
         raise HTTPException(status_code=404, detail="Optimus is idle.")
     else:
-        optimus.state.job.cancel()
-        # Let it observe CancelledError and run its own cleanup
-        await asyncio.gather(optimus.state.job, return_exceptions=True)
-        optimus.state.job = None
-        # Clean up after cancellation
-        log_internal_event("[BACKEND] Cleaning up after client cancellation.")
-        optimus.state.situation = {}
-        optimus.state.tokens = asyncio.Queue()
-        for title,task in optimus.state.tasks.items():
-            if task.get("state") == "awake":
-                task["state"] = "sleeping"
+        await optimus.stop()
+        # optimus.state.job.cancel()
+        # # Let it observe CancelledError and run its own cleanup
+        # await asyncio.gather(optimus.state.job, return_exceptions=True)
+        # optimus.state.job = None
+        # # Clean up after cancellation
+        # log_internal_event("[BACKEND] Cleaning up after client cancellation.")
+        # optimus.state.situation = {}
+        # optimus.state.tokens = asyncio.Queue()
+        # for title,task in optimus.state.tasks.items():
+        #     if task.get("state") == "awake":
+        #         task["state"] = "sleeping"
 
 @app.get("/tasks")
 async def tasks_page():

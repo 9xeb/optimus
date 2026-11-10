@@ -12,7 +12,7 @@ services:
       - 8000:8000
     network_mode: host
     volumes:
-     - optimus-data:/home/optimus/data
+     - optimus-data:/data
   runner:
     # image: ghcr.io/ggml-org/llama.cpp:server-b10454
     image: ghcr.io/ggml-org/llama.cpp:server-b11977
@@ -55,6 +55,7 @@ services:
     network_mode: host
     volumes:
       - sandbox-data:/home/gem/workspace
+      - /:/home/gem/workspace/user-root:ro    # TEST THIS
       - sandbox-kube:/home/gem/.kube
       # Add custom mounts here...
     extra_hosts:
