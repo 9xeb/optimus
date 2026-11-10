@@ -1,19 +1,19 @@
 # Optimus - Agentic Engineering for All
-Optimus is an easy to use AI agents platform that works with users to solve their problems. Some strong design choices were made to make Optimus an actual machine, meant to be owned and operated by accountable real users, with an option to run fully autonomously in low-risk scenarios.
+Optimus is an easy to use AI agents platform that works with users to solve their problems. Some strong design choices were made to make Optimus an actual machine, meant to be owned and operated by accountable real users, with an option to perform fully autonomous tasks in low-risk scenarios.
 
 It features:
-1. **Dynamic multi-agent architectures** with minimal assumptions. Forget hard-coded sub-agents, esoteric skills and "trust me, bro" prompts. Users and LLMs co-design agent architectures from scratch as their problems are being solved.
+1. **Dynamic multi-agent architectures** with minimal assumptions and a low technical barrier. Forget hard-coded sub-agents, esoteric skills and "trust me, bro" prompts. Users and LLMs co-design agent architectures from scratch as their problems are being solved.
 2. A **powerful problem solving engine** to expand the horizon of tasks solvable by cheaper LLMs, based on [this research on context segmentation](https://arxiv.org/abs/2609.12839).
 3. A **robust agent harness** with feedback to allow even the weakest agent-ready LLM to recover from and capitalize on small mistakes, shifting user priorities, and unexpected situations.
 
-Optimus aims to be deployable in the cloud and on edge devices, with wide applications ranging from daily white-collar co-workers to industrial robots, given the right MCP tools.
+Optimus aims to be deployable in the cloud and on edge devices, with wide applications ranging from white-collar co-workers to industrial robots, given the right MCP tools.
 
 Powered by [LLMs](https://github.com/ggml-org/llama.cpp) and [DSPy](https://github.com/stanfordnlp/dspy). Does not stand in the way of search and compute.
 
 <!-- # QUICK DEMO HERE -->
 
 # Installation
-Optimus comes with a **Docker Compose** stack that deploys a **Gemma-4 E4B model on CPU** by default, an **agent sandbox** with terminal and browser tools, and the **optimus backend and frontend app**. 8GB of RAM is enough for the entire stack to run.
+Optimus comes with a **Docker Compose** stack that deploys a **Gemma-4 E4B model on CPU** by default, an **agent sandbox** with terminal and browser tools, and the **optimus backend and frontend app**. 8GB of RAM is enough for the entire default stack to run.
 
 Alternatively, you can skip Docker and configure Optimus in your Python environment, but you must provide your own OpenAI compatible API and MCP server.
 
@@ -47,8 +47,7 @@ python3 backend.py --file tasks.json --approval
 # How the harness works
 Optimus is a **ReAct loop spawning graphs of ReAct loops**. It splits the main task into sub-tasks, solves them, observes the results and decides if either new sub-tasks are due or the main task is complete. Each sub-task is tackled by a separate ReAct agent, carrying the benefits explained in [this paper](https://arxiv.org/abs/2609.12839). For the duration of the same main task, agents share their findings in a common `working memory`. This core engine is mostly invisible to the user, to both avoid getting in the way of the extraordinary search and compute capabilities of AI Agents, and to keep the user focused on its own problems.
 
-
-An Optimus agent, at any point, stops and asks for the user's intervention when either:
+An Optimus agent stops and asks for the user's intervention when either:
 1. a **non-readonly action** is about to be performed;
 2. it is lost and **unable to complete** its task;
 3. it thinks the **main task is done**.
@@ -74,12 +73,11 @@ graph TD
     Optimus -- prompt --> Agent+MCP
     Agent+MCP -- ReAct --> Agent+MCP
     Agent+MCP -- report --> Optimus
-    Agent+MCP -- escalate --> User
 ```
 
 ## Tools
-Keeping context size minimal makes AI Agents faster, cheaper and smarter. Since tools are one of the major sources of context bloat in AI Agents, Optimus features:
-- **context segmentation** so that, for example, an agent scrolling documentation in a browser only shares the final results of its research with a second agent writing code on a terminal;
+Keeping context size minimal makes AI Agents faster, cheaper and smarter. Since tool definitions and tool call chains are two of the major sources of context bloat in AI Agents, Optimus features:
+- **context segmentation** so that, for example, an agent scrolling documentation in a browser only shares the final results of its research, instead of the entire trajectory, with a second agent writing code on a terminal;
 - robust **dynamic tool discovery**, hiding any number of verbose and irrelevant tool descriptions behind a `list_tools`, `describe_tools` and `run_tools` triplet for all ReAct loops;
 - in particular, `run_tools` accepts a list of tools, allowing agents to perform multiple actions within a single reasoning step.
 
@@ -88,11 +86,12 @@ Keeping context size minimal makes AI Agents faster, cheaper and smarter. Since 
 ### DeepSeek V4.1 Flash - Deep research with frontier models
 
 ## Future additions
+- tool output scrolling
 - visible context memory pressure before pivoting
-- memory oblivion logic for `examples`;
+<!-- - memory oblivion logic for `examples`; -->
 - cronjobs;
 - user sessions in backend and frontend
-- openai compatible API as main optimus interface (this unlocks mobile apps)
+- openai compatible API as main optimus interface (this unlocks mobile apps and business integrations)
 - chat gateways (telegram, slack, discord, teams, gmeet)
 - better minimum viable MCP sandbox (browser, terminal, files folder and chat gateways), MVMS.
 - decision models (DeAct?)
@@ -120,7 +119,7 @@ Keeping context size minimal makes AI Agents faster, cheaper and smarter. Since 
 
 
 # How Optimus came to be
-Motivated by the possibility of realizing the main contributor's childhood dream of having thinking machines making lives easier and happier for humans, and not the other way around, I have been experimenting with SLMs on cheap hardware for more than three years. Optimus is the last iteration, after a long list of previously failed and dropped attempts to make local artificially intelligent agents useful.
+Motivated by the possibility of realizing my childhood dream of having thinking machines making lives easier and happier for humans, and not the other way around, I have been experimenting with SLMs on cheap hardware for more than three years. Optimus is the last iteration, after a long list of previously failed and dropped attempts to make local artificially intelligent agents useful.
 
 ## The intuition
 Suppose your AI agent achieved the intended goal with no mistakes and no hiccups, then look just one step back. All your AGENT.md, MEMORY.md, skills, tool signatures, RAG knowledge, chat messages were mixed into a single, final prompt. That prompt got the job done, but your harness is now a bloated mess that binds you to expensive and ever scarier proprietary frontier model providers.
