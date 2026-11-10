@@ -83,12 +83,12 @@ class RCS(dspy.Module):
         """
         try:
             # # Reset ephemeral dependencies
-            for task in list(self.state.tasks.keys()):
-                if self.state.tasks[task]["kind"] == "root":
-                    log_internal_event(f"[RCS] Remove ephemeral dependencies of [{task}]")
-                    self.state.tasks[task]["dependencies"] = [
+            for existing_task in list(self.state.tasks.keys()):
+                if self.state.tasks[existing_task]["kind"] == "root":
+                    log_internal_event(f"[RCS] Remove ephemeral dependencies of [{existing_task}]")
+                    self.state.tasks[existing_task]["dependencies"] = [
                         dependency
-                        for dependency in self.state.tasks[task]["dependencies"]
+                        for dependency in self.state.tasks[existing_task]["dependencies"]
                         if self.state.tasks.get(dependency) and self.state.tasks[dependency]["kind"] == "root"
                     ]
             log_internal_event("[RCS] Remove all ephemeral tasks")
@@ -112,7 +112,7 @@ class RCS(dspy.Module):
                 ]
                 if task in root_tasks:
                     # Case 1: reuse known task
-                    log_internal_event(f"[RCS] Picking known root task: [{task}].")
+                    log_internal_event(f"[RCS] Picking known root task: [{task}]")
 
                     # Rebuild task's payload
                     task_payload = Task(
@@ -291,17 +291,20 @@ class RCS(dspy.Module):
                 # # # #         "qna": []
                 # # # #     }
 
-                # # # # # 0. Attempt a cache hit on previously reported tasks
-                # # # # if not self.is_task_expired(task.title) and ollare:
-                # # # #     log_internal_event(f"Cache hit for task [{task.title}]")
-                # # # #     continue    # skip this task and trust the cache in self.state.tasks
-                
                 # Ensure sane defaults for new task
                 if not self.state.tasks.get(task.title):
                     self.state.tasks[task.title] = {
                         "dependencies": [],
                         "tips": []
                     }
+
+                # 0. Attempt a cache hit on previously reported root task dependencies
+                if task.kind == "root" and task.title != self.state.parent.title and not self.is_task_expired(task.title):
+                    log_internal_event(f"Cache hit for [{task.title}]")
+                    # Update working memory index
+                    self.awakened_list += [task.title]
+                    continue    # skip this task and trust the cache in self.state.tasks                
+
 
                 # log_internal_event(f"[AGENTS] Dependencies: {task.dependencies}")
                 # 1. Recursively refresh shared state for dependencies
@@ -494,7 +497,7 @@ class RCS(dspy.Module):
         info = [{"current_time": datetime.datetime.now(datetime.UTC).isoformat()}]
         info += [
             {
-                "trajectory": self.state.tasks[self.state.parent.title]["trajectory"],
+                # "trajectory": self.state.tasks[self.state.parent.title]["trajectory"],
                 "working_memory": [
                     {
                         "title": awakened,

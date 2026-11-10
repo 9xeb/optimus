@@ -126,17 +126,18 @@ class Optimus():
                     class ToolCall:
                         """Tool call payload"""
                         goal: str = field(metadata={"description": "What the call is meant to achieve."})
+                        change: bool = field(metadata={"description": "True if the call makes a potentially breaking change. False otherwise."})
                         name: str
                         args: dict
                         # readonly: bool = field(metadata={"description": "True if the call is a read only operation. False otherwise."})
                         # affects_user: bool = field(metadata={"description": "True if the call makes changes to the property of the user. False otherwise."})
                         # requires_approval: bool = field(metadata={"description": "True if the user should approve this call first. False otherwise."})
-                        change: bool = field(metadata={"description": "True if the call makes a potentially breaking change. False otherwise."})
                     async def run_tools(calls: list[ToolCall]):
                         """
                         Run a list of tools by name.
-                        Split as many tool calls as possible in multiple items in the call list.
+                        When iterating, submit the single largest list of calls possible.
                         """
+                        # Split as many tool calls as possible in multiple items in the call list.
                         # Split repetitive or looping operations into multiple items in the calls list.
                         list_flag = False   # track if tools already listed to avoid spam in the same batch
                         output = []
