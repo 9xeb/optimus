@@ -1,10 +1,11 @@
 # Optimus - Agentic Engineering for All
-Optimus is an easy to use AI agents platform that works with users to solve their problems. Some strong design choices were made to make Optimus an actual machine, meant to be owned and operated by accountable real users, with an option to perform fully autonomous tasks in low-risk scenarios.
+Optimus is an easy to use, zero-code, AI agents platform that works with users to solve their problems. Connect it to your organization's network and start working. Some strong design choices were made to make Optimus an actual machine, meant to be owned and operated by accountable real users, with an option to repeat fully autonomous tasks in well established or low-risk scenarios.
 
 It features:
 1. **Dynamic multi-agent architectures** with minimal assumptions and a low technical barrier. Forget hard-coded sub-agents, esoteric skills and "trust me, bro" prompts. Users and LLMs co-design agent architectures from scratch as their problems are being solved.
 2. A **powerful problem solving engine** to expand the horizon of tasks solvable by cheaper LLMs, based on [this research on context segmentation](https://arxiv.org/abs/2609.12839).
 3. A **robust agent harness** with feedback to allow even the weakest agent-ready LLM to recover from and capitalize on small mistakes, shifting user priorities, and unexpected situations.
+4. An **intuitive user interface** that allows drawing, testing, steering and connecting task nodes.
 
 Optimus aims to be deployable in the cloud and on edge devices, with wide applications ranging from white-collar co-workers to industrial robots, given the right MCP tools.
 
@@ -13,7 +14,7 @@ Powered by [LLMs](https://github.com/ggml-org/llama.cpp) and [DSPy](https://gith
 <!-- # QUICK DEMO HERE -->
 
 # Installation
-Optimus comes with a **Docker Compose** stack that deploys a **Gemma-4 E4B model on CPU** by default, an **agent sandbox** with terminal and browser tools, and the **optimus backend and frontend app**. 8GB of RAM is enough for the entire default stack to run.
+Optimus comes with a **Docker Compose** stack that deploys a **Gemma-4 E4B model on CPU** by default, an **agent sandbox** with terminal and browser tools, and the **Optimus backend and frontend app**. 8GB of RAM is enough for the entire default stack to run.
 
 Alternatively, you can skip Docker and configure Optimus in your Python environment, but you must provide your own OpenAI compatible API and MCP server.
 
@@ -119,7 +120,7 @@ Keeping context size minimal makes AI Agents faster, cheaper and smarter. Since 
 
 
 # How Optimus came to be
-Motivated by the possibility of realizing my childhood dream of having thinking machines making lives easier and happier for humans, and not the other way around, I have been experimenting with SLMs on cheap hardware for more than three years. Optimus is the last iteration, after a long list of previously failed and dropped attempts to make local artificially intelligent agents useful.
+Motivated by the possibility of realizing my childhood dream of having little thinking machines making lives easier and happier for humans, and not the other way around, I have been experimenting with SLMs on cheap hardware for more than three years. Optimus is the last iteration, after a long list of previously failed and dropped attempts to make local artificially intelligent agents useful.
 
 ## The intuition
 Suppose your AI agent achieved the intended goal with no mistakes and no hiccups, then look just one step back. All your AGENT.md, MEMORY.md, skills, tool signatures, RAG knowledge, chat messages were mixed into a single, final prompt. That prompt got the job done, but your harness is now a bloated mess that binds you to expensive and ever scarier proprietary frontier model providers.
@@ -132,7 +133,7 @@ Instead of manually chasing outcomes, Optimus focuses on applying a scientific m
 ## From Conversations to Prototyping
 We are used to chatting with AI. On one side, conversations and prompt engineering with LLMs can become exhausting for humans when faced with complex tasks. The gap between what you want to say and how you should say it can get frustrating. On the other side, computers require linearly more RAM as conversations grow, and this can quickly become a dealbreaker when deploying locally.
 
-Optimus replaces long conversations with machine accelerated prototyping. Humans are called when Agents are lost, not the other way around. Humans are also required to approve dangerous actions. This means that when you see Optimus humming for ~15 minutes before coming back to you, you should remember that it has probably just spared you tens of thousands of tokens of tedious conversations and manual engineering.
+Chatbots came first, but that's not what agents are about. Optimus replaces long conversations with a zero-code canvas, where machine accelerated prototyping of agentic architectures can be performed by anyone. Humans are called when Agents are lost, not the other way around. Humans are also required to approve dangerous actions, and provide tips when unsatisfied. This means that when you see Optimus humming for ~15 minutes before coming back to you, you should remember that it has probably just spared you tens of thousands of tokens of tedious conversations and manual engineering, and it's running privately on your laptop for free at a fraction of the available CPU cores.
 
 Optimus differs from a typical conversational interface for a few reasons:
 - effort is shifted away from the user and towards the LLM;
