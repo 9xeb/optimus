@@ -1,5 +1,5 @@
 # Optimus - Agentic Engineering for All
-<img src="./docs/optimus-lockup-light.svg">
+<img src="./docs/optimus-lockup-dark.svg">
 
 Optimus is an easy to use, zero-code, AI agents platform that works with users to solve their problems. Deploy locally in your computer and start working. Some strong design choices were made to make Optimus an actual machine, meant to be owned and operated by accountable real users, with an option to repeat fully autonomous tasks in well established or low-risk scenarios.
 
