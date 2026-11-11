@@ -24,6 +24,8 @@ parser.add_argument('-a', '--approval', action='store_true', help='Enable tool a
 args = parser.parse_args()
 
 app = FastAPI()
+app.frontend("/", directory="dist")
+
 optimus = Optimus(filepath=args.file, approval=args.approval)
 
 @app.get("/health")
@@ -124,11 +126,11 @@ async def review_situation(review: dict):
     else:
         log_internal_event("[BACKEND] There are no pending situations")
 
-@app.get("/", response_class=HTMLResponse)
-async def home_page():
-    """Frontend Home Page"""
-    with open("index.html", 'r', encoding="utf-8") as homepage:
-        return homepage.read()
+# @app.get("/", response_class=HTMLResponse)
+# async def home_page():
+#     """Frontend Home Page"""
+#     with open("index.html", 'r', encoding="utf-8") as homepage:
+#         return homepage.read()
 
 # For reference:
 # @app.post("/tasks/{task_id}")
