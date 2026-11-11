@@ -46,7 +46,7 @@ Alternatively, you can skip Docker and configure Optimus in your Python environm
 ### With Docker
 Spin up the entire local agentic stack ([llama.cpp](https://github.com/ggml-org/llama.cpp), [AIO agent sandbox](https://github.com/agent-infra/sandbox), optimus), or edit the env vars in the `optimus` service to point to a different OpenAI compatible provider, and MCP gateway.
 ```bash
-docker compose up -d optimus sandbox runner
+THREADS=8 docker compose up -d optimus sandbox runner
 ```
 Start working with Optimus at `http://127.0.0.1:8000`.
 
