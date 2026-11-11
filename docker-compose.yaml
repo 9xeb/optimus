@@ -16,7 +16,7 @@ services:
   runner:
     # image: ghcr.io/ggml-org/llama.cpp:server-b10454
     image: ghcr.io/ggml-org/llama.cpp:server-b11977
-    # command: --no-mmproj
+    command: --threads-batch ${THREADS:-4}
     environment:
       # GGML_VK_DISABLE_F16: 1  # workaround to avoid gibberish output on Intel iGPUs (https://github.com/ggml-org/llama.cpp/issues/17106)
       LLAMA_ARG_HOST: 0.0.0.0
@@ -27,7 +27,7 @@ services:
       LLAMA_ARG_JINJA: 1
       LLAMA_ARG_BATCH: 512
       # LLAMA_ARG_N_GPU_LAYERS: 0
-      LLAMA_ARG_THREADS: 4
+      LLAMA_ARG_THREADS: ${THREADS:-4}
       # LLAMA_ARG_LOAD_MODE: mlock
       LLAMA_ARG_CACHE_TYPE_K: q8_0
       LLAMA_ARG_CACHE_TYPE_v: q8_0
