@@ -219,22 +219,6 @@ class RCS(dspy.Module):
         Example call (no 'items' key under 'subtasks'):
             next_tool_args = {"tasks": [{"title": "...", "task": "...", "kind": "..."}]}
         """
-        # , minimizing the amount of information passed to each sub-task
-        # # Break down your strategy into the most conservative minimal immediate best sub-tasks, given what is known so far.
-        # Break down your strategy in sub-tasks making the fewest assumptions possible, given what is known so far.
-        # Break down your strategy into the most conservative minimal immediate best sub-tasks, given what is known so far.
-        # Split what would be a larger or looping task into multiple items in the subtasks list. 
-
-        # Example call:
-        #     next_tool_args = {"tasks": [{"title": "...", "task": "...", "kind": "...", "dependencies": []}]}
-        # Run the best next sub-tasks architecture to fulfill the task or part of the task, given what is known so far.
-        # Run the most conservative minimal immediate best next sub-tasks architecture, given what is known so far.
-        # If presented with partial information, run an equally partial architecture, since you can always run the next when more info arrives.
-
-        # How this works:
-        # 1. Sanity checks (ghost dependencies, broken names, ...)
-        # 2. Populate 'info' for RAG
-        # 3. Run task with appropriate dspy program (complex or simple)
 
         log_internal_event(f"[AGENTS] Grabbed tasks: {subtasks}")
         try:
@@ -283,13 +267,6 @@ class RCS(dspy.Module):
             # This rebuilds context and runs each task
             for task in subtasks:
                 # log_internal_event(f"[AGENTS] Triggered task type {task.kind}")
-                # # # # # Ensure sane defaults for new task
-                # # # # if not self.state.tasks.get(task.title):
-                # # # #     self.state.tasks[task.title] = {
-                # # # #         "dependencies": [],
-                # # # #         "tips": [],
-                # # # #         "qna": []
-                # # # #     }
 
                 # Ensure sane defaults for new task
                 if not self.state.tasks.get(task.title):
@@ -439,11 +416,6 @@ class RCS(dspy.Module):
             # Retry a bunch of times (LLM backend might be flaky)
             if retries > 0:
                 await asyncio.sleep(3)
-                # self.state.qna["How to call a tool from the list?"] = {
-                #     "kind": self.state.current.kind,
-                #     "content": "Tools must be wrapped around the 'run_tools' interface."
-                # }
-                # log_error(f"Updated qna: {json.dumps(self.state.qna, indent=4)}")
 
                 # Retry failing agents
                 return await self.recurse(
