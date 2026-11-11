@@ -12,6 +12,31 @@ Optimus aims to be deployable in the cloud and on edge devices, with wide applic
 Powered by [LLMs](https://github.com/ggml-org/llama.cpp) and [DSPy](https://github.com/stanfordnlp/dspy). Does not stand in the way of search and compute.
 
 <!-- # QUICK DEMO HERE -->
+<table>
+  <tr>
+    <td align="center">
+      <img src="docs/optimus_create.gif" width="250">
+      <br>
+      <b>Create Nodes</b>
+      <br>
+      Create nodes to invent news tasks
+    </td>
+    <td align="center">
+      <img src="docs/optimus_steer_fast.gif" width="250">
+      <br>
+      <b>Steer Nodes</b>
+      <br>
+      Read node reports and tell it where to improve
+    </td>
+    <td align="center">
+      <img src="docs/optimus_connect.gif" width="250">
+      <br>
+      <b>Connect Nodes</b>
+      <br>
+      Build on previously established tasks
+    </td>
+  </tr>
+</table>
 
 # Installation
 Optimus comes with a **Docker Compose** stack that deploys a **Gemma-4 E4B model on CPU** by default, an **agent sandbox** with terminal and browser tools, and the **Optimus backend and frontend app**. 8GB of RAM is enough for the entire default stack to run.
