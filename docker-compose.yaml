@@ -20,6 +20,7 @@ services:
     environment:
       # GGML_VK_DISABLE_F16: 1  # workaround to avoid gibberish output on Intel iGPUs (https://github.com/ggml-org/llama.cpp/issues/17106)
       LLAMA_ARG_HOST: 0.0.0.0
+      LLAMA_ARG_PORT: 9931
       # LLAMA_ARG_HF_REPO: unsloth/gemma-4-E4B-it-qat-GGUF:UD-Q4_K_XL
       LLAMA_ARG_HF_REPO: unsloth/NVIDIA-Nemotron-3.5-Bolt-E4B-GGUF:UD-Q4_K_XL
       LLAMA_ARG_LOG_VERBOSITY: 3
@@ -47,7 +48,7 @@ services:
     networks:
       - optimus
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/v1/health"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9931/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
