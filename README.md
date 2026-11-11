@@ -87,7 +87,7 @@ Each of the three cases above ensure that, respectively:
 > [!TIP]
 > Point (2.) is especially relevant when working with weaker LLMs.
 
-Every time the user provides feedback, Optimus stores it in a persistent list of `examples`, shared across all ReAct loops.
+Every time the user provides any feedback, Optimus stores it in a list of `examples` for that task. When the same task is run again, the list will be consumed to refine its instructions and influence all subsequent ReAct loops.
 
 Here is an overview of the engine:
 ```mermaid
