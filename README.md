@@ -1,6 +1,16 @@
 # Optimus - Agentic Engineering for All
 Optimus is an easy to use, zero-code, AI agents platform that works with users to solve their problems. Deploy locally in your computer and start working. Some strong design choices were made to make Optimus an actual machine, meant to be owned and operated by accountable real users, with an option to repeat fully autonomous tasks in well established or low-risk scenarios.
 
+It features:
+1. **Dynamic multi-agent architectures** with minimal assumptions and a low technical barrier. Forget hard-coded sub-agents, esoteric skills and "trust me, bro" prompts. Users and LLMs co-design agent architectures from scratch as their problems are being solved.
+2. A **powerful problem solving engine** to expand the horizon of tasks solvable by cheaper LLMs, based on [this research on context segmentation](https://arxiv.org/abs/2609.12839).
+3. A **robust agent harness** with feedback to allow even the weakest agent-ready LLM to recover from and capitalize on small mistakes, shifting user priorities, and unexpected situations.
+4. An **intuitive user interface** that allows drawing, testing, steering and connecting task nodes.
+
+Optimus aims to be deployable in the cloud and on edge devices, with wide applications ranging from white-collar co-workers to industrial robots, given the right MCP tools.
+
+Powered by [LLMs](https://github.com/ggml-org/llama.cpp) and [DSPy](https://github.com/stanfordnlp/dspy). Does not stand in the way of search and compute.
+
 <!-- # QUICK OPERATIONS HERE -->
 <table>
   <tr>
@@ -27,16 +37,6 @@ Optimus is an easy to use, zero-code, AI agents platform that works with users t
     </td>
   </tr>
 </table>
-
-It features:
-1. **Dynamic multi-agent architectures** with minimal assumptions and a low technical barrier. Forget hard-coded sub-agents, esoteric skills and "trust me, bro" prompts. Users and LLMs co-design agent architectures from scratch as their problems are being solved.
-2. A **powerful problem solving engine** to expand the horizon of tasks solvable by cheaper LLMs, based on [this research on context segmentation](https://arxiv.org/abs/2609.12839).
-3. A **robust agent harness** with feedback to allow even the weakest agent-ready LLM to recover from and capitalize on small mistakes, shifting user priorities, and unexpected situations.
-4. An **intuitive user interface** that allows drawing, testing, steering and connecting task nodes.
-
-Optimus aims to be deployable in the cloud and on edge devices, with wide applications ranging from white-collar co-workers to industrial robots, given the right MCP tools.
-
-Powered by [LLMs](https://github.com/ggml-org/llama.cpp) and [DSPy](https://github.com/stanfordnlp/dspy). Does not stand in the way of search and compute.
 
 # Installation
 Optimus comes with a **Docker Compose** stack that deploys a **Gemma-4 E4B model on CPU** by default, an **agent sandbox** with terminal and browser tools, and the **Optimus backend and frontend app**. 8GB of RAM is enough for the entire default stack to run.
