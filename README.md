@@ -24,7 +24,7 @@ Powered by [LLMs](https://github.com/ggml-org/llama.cpp) and [DSPy](https://gith
     <td align="center">
       <img src="docs/optimus_steer_fast.gif" width="250">
       <br>
-      <b>Steer</b>
+      <b>Consolidate</b>
       <br>
       Read node reports and tell it where to improve
     </td>
