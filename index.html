@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<link rel="icon" href="data:,"/>
+<meta name="theme-color" content="#070b12"/>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Crect%20width='16'%20height='16'%20rx='3'%20fill='%230e1522'/%3E%3Cpath%20d='M10.4%2012.16%20A4.8%204.8%200%201%201%2012.16%2010.4'%20fill='none'%20stroke='%2335d0ff'%20stroke-width='1.6'%20stroke-linecap='round'/%3E%3Ccircle%20cx='8'%20cy='8'%20r='2.2'%20fill='%23e6faff'/%3E%3C/svg%3E"/>
 <title>Optimus Console</title>
 <style>
   :root {
@@ -25,8 +26,20 @@
   #topbar { display: flex; align-items: center; gap: 16px; padding: 10px 18px; background: linear-gradient(180deg, rgba(19,28,44,.92), rgba(14,21,34,.78)); border-bottom: 1px solid var(--border); backdrop-filter: blur(8px); z-index: 30; flex: 0 0 auto; }
   .brand { display: flex; align-items: center; gap: 10px; cursor: pointer; flex: 0 0 auto; border-radius: 8px; padding: 2px; }
   .brand:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
-  .logo { width: 28px; height: 28px; border-radius: 8px; background: radial-gradient(circle at 30% 30%, #6fe6ff, #1aa7d6 60%, #0b4f6b); box-shadow: 0 0 18px rgba(53,208,255,.45), inset 0 0 10px rgba(255,255,255,.3); }
-  .brand h1 { margin: 0; font-size: 13px; letter-spacing: .2em; font-weight: 700; }
+  .brand-mark { width: 28px; height: 28px; flex: 0 0 auto; display: block; }
+  .brand-wordmark { margin: 0; display: flex; flex-direction: column; gap: 2px; line-height: 1; }
+  .brand-name { font-family: var(--sans); font-size: 13px; font-weight: 650; letter-spacing: .18em; color: var(--text); }
+  .brand-sub { font-family: var(--mono); font-size: 8.5px; font-weight: 600; letter-spacing: .26em; color: #7d8fa9; }
+  .brand-ring { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
+  .brand-core { fill: #e6faff; }
+  .brand-edge { fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-opacity: .55; }
+  .brand-chevron { fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; stroke-opacity: .55; }
+  .brand-child { fill: var(--text-dim); }
+  .brand.busy .brand-core { animation: brandbreathe 1.7s ease-in-out infinite; }
+  .brand.busy .brand-edge { stroke-opacity: .9; stroke-dasharray: 2 4; animation: dashflow 1s linear infinite; }
+  .brand.busy .brand-chevron { stroke-opacity: .9; }
+  .brand.busy .brand-ring { stroke: #6fe6ff; }
+  @keyframes brandbreathe { 0%,100% { opacity: .85; } 50% { opacity: 1; } }
   .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; flex: 0 0 auto; position: relative; z-index: 30; }
   #sandbox-open { text-decoration: none; }
   .status { font-size: 10.5px; color: var(--text-faint); font-family: var(--mono); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -54,11 +67,13 @@
   #stop-confirm-error { margin-top: 8px; font-size: 11.5px; color: #ffc0c6; font-family: var(--mono); }
   .stop-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
   @media (max-width: 520px) {
+    .brand-sub { display: none; }
     .stop-label-full { display: none; }
     .stop-label-short { display: inline; }
     #stop-confirm { position: fixed; top: 58px; left: 12px; right: 12px; width: auto; }
   }
   @media (max-width: 380px) {
+    .brand-wordmark { display: none; }
     #topbar { gap: 8px; padding: 10px 12px; }
     .topbar-actions { gap: 6px; }
   }
@@ -350,8 +365,17 @@
 <div id="app">
   <header id="topbar">
     <div class="brand" id="brand" role="button" tabindex="0" aria-label="All roots">
-      <span class="logo"></span>
-      <h1>OPTIMUS</h1>
+      <svg class="brand-mark" viewBox="0 0 28 28" aria-hidden="true" focusable="false">
+        <path class="brand-ring" d="M14.59 18.70 A8.5 8.5 0 1 1 18.70 14.59"/>
+        <circle class="brand-core" cx="11" cy="11" r="3.5"/>
+        <path class="brand-edge" d="M16.1 16.1 Q18 18 20 20"/>
+        <path class="brand-chevron" d="M18.6 20.5 L20 20 L19.5 18.6"/>
+        <circle class="brand-child" cx="22.6" cy="22.6" r="2.8"/>
+      </svg>
+      <h1 class="brand-wordmark">
+        <span class="brand-name">OPTIMUS</span>
+        <span class="brand-sub">CONSOLE</span>
+      </h1>
     </div>
     <div class="topbar-actions">
       <button id="stop-all" class="btn tiny ghost danger" type="button" aria-haspopup="dialog" aria-expanded="false" aria-disabled="true" aria-label="Stop all tasks: Nothing is running" title="Nothing is running">
@@ -2153,6 +2177,7 @@ function paintTop() {
   const awake = awakeCount() > 0;
   st.classList.toggle('error', !!state.error);
   st.classList.toggle('busy', !state.error && awake);
+  document.getElementById('brand').classList.toggle('busy', !state.error && awake);
   st.title = state.error ? 'backend unreachable' : (awake ? 'engine working' : 'connected');
   s.textContent = state.error ? 'backend unreachable' : '';
 }
