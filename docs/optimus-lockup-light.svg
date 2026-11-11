@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 80" role="img" aria-labelledby="title">
+  <title id="title">Optimus</title>
+  <!-- Satellite mark -->
+  <path d="M41.18 49.40 A17 17 0 1 1 49.40 41.18" fill="none" stroke="#0b7fa6" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="34" cy="34" r="7" fill="#0e1522"/>
+  <path d="M44.2 44.2 Q48 48 52 52" fill="none" stroke="#0b7fa6" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M49.2 53 L52 52 L51 49.2" fill="none" stroke="#0b7fa6" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="57.2" cy="57.2" r="5.6" fill="#6d7f9b"/>
+  <!-- Wordmark -->
+  <text x="88" y="49.5" fill="#0e1522" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="26" font-weight="650" letter-spacing="4.68">OPTIMUS</text>
+</svg>
