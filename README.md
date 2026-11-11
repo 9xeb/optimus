@@ -17,23 +17,23 @@ Powered by [LLMs](https://github.com/ggml-org/llama.cpp) and [DSPy](https://gith
     <td align="center">
       <img src="docs/optimus_create.gif" width="250">
       <br>
-      <b>Create Nodes</b>
+      <b>Create</b>
       <br>
-      Create nodes to invent news tasks
+      Create nodes to invent new tasks
     </td>
     <td align="center">
       <img src="docs/optimus_steer_fast.gif" width="250">
       <br>
-      <b>Steer Nodes</b>
+      <b>Steer</b>
       <br>
       Read node reports and tell it where to improve
     </td>
     <td align="center">
       <img src="docs/optimus_connect.gif" width="250">
       <br>
-      <b>Connect Nodes</b>
+      <b>Connect</b>
       <br>
-      Build on previously established tasks
+      Build on previously established nodes
     </td>
   </tr>
 </table>
