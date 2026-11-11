@@ -1,5 +1,5 @@
 # Optimus - Agentic Engineering for All
-Optimus is an easy to use, zero-code, AI agents platform that works with users to solve their problems. Connect it to your organization's network and start working. Some strong design choices were made to make Optimus an actual machine, meant to be owned and operated by accountable real users, with an option to repeat fully autonomous tasks in well established or low-risk scenarios.
+Optimus is an easy to use, zero-code, AI agents platform that works with users to solve their problems. Deploy locally in your computer and start working. Some strong design choices were made to make Optimus an actual machine, meant to be owned and operated by accountable real users, with an option to repeat fully autonomous tasks in well established or low-risk scenarios.
 
 It features:
 1. **Dynamic multi-agent architectures** with minimal assumptions and a low technical barrier. Forget hard-coded sub-agents, esoteric skills and "trust me, bro" prompts. Users and LLMs co-design agent architectures from scratch as their problems are being solved.
