@@ -1,12 +1,16 @@
 # Optimus - Agentic Engineering for All
-<div align="center">
+<!-- <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="./docs/optimus-lockup-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="./assets/optimus-lockup-light.svg">
     <img alt="Optimus" src="./docs/optimus-lockup-dark.svg" width="300">
   </picture>
-</div>
-<!-- <img src="./docs/optimus-lockup-dark.svg"> -->
+</div> -->
+<!-- Dark mode -->
+<img src="./docs/optimus-lockup-dark.svg#gh-dark-mode-only" alt="Logo">
+
+<!-- Light mode -->
+<img src="./docs/optimus-lockup-light.svg#gh-light-mode-only" alt="Logo">
 
 Optimus is an easy to use, zero-code, AI agents platform that works with users to solve their problems. Deploy locally in your computer and start working. Some strong design choices were made to make Optimus an actual machine, meant to be owned and operated by accountable real users, with an option to repeat fully autonomous tasks in well established or low-risk scenarios.
 
