@@ -63,6 +63,7 @@ jobs:
   
   package_optimus:
     needs: test_optimus
+    runs-on: ubuntu-latest
     steps:
       # Build and push
       - name: Set up Docker Buildx
