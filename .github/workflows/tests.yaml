@@ -1,4 +1,4 @@
-name: Unit testing for Optimus
+name: Unit testing and packaging
 
 # events that trigger jobs
 # on:
@@ -8,9 +8,10 @@ on:
   push:
     branches:
       - main
-    tags:
-      - 'v*'
-  workflow_dispatch:
+      - dev
+  #   tags:
+  #     - 'v*'
+  # workflow_dispatch:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -59,31 +60,34 @@ jobs:
         -e OPENAI_API_MODEL=openai/local \
         -e MCP_GATEWAY=http://127.0.0.1:8081 \
         9xeb/optimus:test
-    
-    # Build and push
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-    - name: Login to GitHub Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    - name: Extract Docker metadata
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: ghcr.io/${{ github.repository }}
-        tags: |
-          type=raw,value=latest,enable={{is_default_branch}}
-          type=ref,event=tag
-          type=sha
-    - name: Build and Push Docker Image
-      uses: docker/build-push-action@v6
-      with:
-        context: .
-        push: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
+  
+  package_optimus:
+    needs: test_optimus
+    steps:
+      # Build and push
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
+            type=sha
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
 
