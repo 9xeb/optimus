@@ -64,6 +64,9 @@ jobs:
   package_optimus:
     needs: test_optimus
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       # Build and push
       - name: Clone repo
