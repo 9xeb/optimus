@@ -243,7 +243,7 @@ class RCS(dspy.Module):
             self.state.tasks[self.state.current.title]["examples"] += self.state.tasks[self.state.current.title]["tips"]
             output = f"Before you proceed, the user provided these additional tips: {self.state.tasks[self.state.current.title["tips"]]}"
             self.state.tasks[self.state.current.title]["tips"] = []
-            log_internal_event(f"[RCS] Some tips were found. {output}")
+            log_internal_event(f"[RCS] Some tips were found going down. {output}")
             return output
 
         log_internal_event(f"[AGENTS] Spawned with tasks: {subtasks}")
@@ -411,14 +411,23 @@ class RCS(dspy.Module):
         # Return reports in LLM-friendly format
         log_internal_event(f"Returning tasks: {subtasks}")
         # await self.state.actions.put({"task": self.state.parent.title, "data": "Collecting reports..."})
+
+        tips_from_user = []
+        if len(self.state.tasks[self.state.current.title]["tips"]) > 0:
+            # Promote tips to examples in parent, and consume tips
+            self.state.tasks[self.state.parent.title]["examples"] += self.state.tasks[self.state.current.title]["tips"]
+            tips_from_user = self.state.tasks[self.state.current.title]["tips"] # remember tips going up
+            self.state.tasks[self.state.current.title]["tips"] = []
+            log_internal_event(f"[RCS] Some tips were found going up. {output}")
+            
         return [
             {"title": task.title} | self.state.tasks[task.title]
             for task in subtasks
+        ] + [
+            # Add tips coming from user after task started
+            # {"tips_from_user": self.state.tasks[self.state.parent.title]["examples"]}
+            {"tips_from_user": tips_from_user}
         ]
-        #  + [
-        #     # Add tips coming from user after task started
-        #     {"tips_from_user": self.state.tasks[self.state.parent.title]["tips"]}
-        # ]
 
     async def recurse(self, module: dspy.Module, task: Task, info: list, retries: int = 3):
         """
