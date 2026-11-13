@@ -27,7 +27,7 @@ class RCS(dspy.Module):
         This lets weaker LLMs observe their mistakes.
         """
         def __missing__(self, name):
-            log_internal_event(f"[RCS] LLM called wrong tool: {name}.")
+            log_internal_event(f"[RCS] LLM did not wrap tool: {name}. Letting it observe the mistake.")
             raise KeyError(
                 f"You must wrap `{name}` with `run_tools`."
             )
@@ -132,12 +132,19 @@ class RCS(dspy.Module):
 
                     # Refine the task's prompt if tier is zero (examples changed)
                     # Basically a hybrid optimization with human in the loop
-                    if self.state.tasks[task]["tier"] == 0:
+                    # if self.state.tasks[task]["tier"] == 0:
+                    if len(
+                        self.state.tasks[task]["examples"] +
+                        self.state.tasks[task]["tips"] +
+                        self.state.tasks[task]["qna"]
+                    ) > 0:
+                        log_internal_event("[RCS] Triggered task instructions refinement.")
                         merge = dspy.ChainOfThought("old_task, updates -> updated_task")
                         merging = merge(old_task=task_payload.task, updates=self.build_examples(task_payload))
                         log_internal_event(f"[RCS] Merged [{task}] with user tips and QnA: [{merging.updated_task}]")
                         task_payload.task = merging.updated_task      # override task's prompt
                         log_internal_event("[RCS] Consuming user tips and agent questions")
+                        self.state.tasks[task]["examples"] = [] # consume examples
                         self.state.tasks[task]["tips"] = []     # consume user tips
                         self.state.tasks[task]["qna"] = []      # consume agent questions
                 else:
@@ -155,6 +162,7 @@ class RCS(dspy.Module):
 
                 # root tasks have self as parent (to build info coherently)
                 self.state.parent = task_payload
+                self.state.current = task_payload
                 self.state.tasks[self.state.parent.title]["trajectory"] = []  # reset trajectory
                 if self.state.tasks[self.state.parent.title].get("report"):
                     del self.state.tasks[self.state.parent.title]["report"]       # reset report
@@ -219,8 +227,16 @@ class RCS(dspy.Module):
         Example call (no 'items' key under 'subtasks'):
             next_tool_args = {"tasks": [{"title": "...", "task": "...", "kind": "..."}]}
         """
+        # Let LLM observe tips before proceeding
+        if len(self.state.tasks[self.state.current.title]["tips"]) > 0:
+            # Promote tips to examples, and consume tips
+            self.state.tasks[self.state.current.title]["examples"] += self.state.tasks[self.state.current.title]["tips"]
+            output = f"Before you proceed, the user provided these additional tips: {self.state.tasks[self.state.current.title["tips"]]}"
+            self.state.tasks[self.state.current.title]["tips"] = []
+            log_internal_event(f"[RCS] Some tips were found. {output}")
+            return output
 
-        log_internal_event(f"[AGENTS] Grabbed tasks: {subtasks}")
+        log_internal_event(f"[AGENTS] Spawned with tasks: {subtasks}")
         try:
             # # # # available_tasks = [
             # # # #     key for key, value in self.state.tasks.items()
@@ -387,6 +403,10 @@ class RCS(dspy.Module):
             {"title": task.title} | self.state.tasks[task.title]
             for task in subtasks
         ]
+        #  + [
+        #     # Add tips coming from user after task started
+        #     {"tips_from_user": self.state.tasks[self.state.parent.title]["tips"]}
+        # ]
 
     async def recurse(self, module: dspy.Module, task: Task, info: list, retries: int = 3):
         """
@@ -423,7 +443,7 @@ class RCS(dspy.Module):
                     task=task,
                     # info=self.build_info(task.kind), # rebuild info after qna update
                     # info=self.build_tips(task.kind) + self.build_working_memory(task.kind), # rebuild info after qna update
-                    info=self.build_working_memory(task.kind), # rebuild working memory
+                    info=self.build_working_memory(task), # rebuild working memory
                     retries=retries-1,
                 )
             else:
@@ -476,14 +496,15 @@ class RCS(dspy.Module):
                         "answer": self.state.tasks[awakened].get("report"),
                     }
                     for awakened in self.awakened_list
-                ],
-            } | self.info
+                ]
+            }
+            # | self.info
         ]
         return info
 
     def build_examples(self, task: Task):
         """Rebuild info for refining task's prompt"""
-        # log_internal_event(f"[RCS] Rebuilding training examples for [{task}]")
+        log_internal_event(f"[RCS] Rebuilding training examples for [{task}]")
         info = [
             {
                 # "tips": [
@@ -491,13 +512,14 @@ class RCS(dspy.Module):
                 #     for question,answer in self.state.qna.items()
                 #     # if answer["kind"] == kind
                 #     if answer["title"] == task.kind
-                "tips": (
+                "examples": (
                     self.state.tasks[task.title]["qna"] +
+                    self.state.tasks[task.title]["examples"] +
                     self.state.tasks[task.title]["tips"]
                 )
             }
         ]
-        log_internal_event(f"[RCS] {self.state.tasks[task.title]}")
+        # log_internal_event(f"[RCS] {self.state.tasks[task.title]}")
         # log_internal_event(f"[RCS] Training examples for [{task}]: {info}")
         return info
 

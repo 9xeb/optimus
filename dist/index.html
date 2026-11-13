@@ -115,6 +115,14 @@
         </div>
         <div id="inspector-run-panel" class="inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-run"></div>
         <div id="inspector-report-panel" class="inspector-panel hidden" role="tabpanel" aria-labelledby="inspector-tab-report"></div>
+        <div id="inspector-steer" class="hidden" role="group" aria-labelledby="inspector-steer-label">
+          <label id="inspector-steer-label" class="inspector-label" for="inspector-steer-input">Steer the running task</label>
+          <textarea id="inspector-steer-input" rows="2" spellcheck="true" placeholder="Tell the running task something it should know…"></textarea>
+          <div id="inspector-steer-foot">
+            <span id="inspector-steer-status" role="status" aria-live="polite"></span>
+            <button id="inspector-steer-submit" class="btn tiny primary" type="button" aria-disabled="true" title="Type a steer first">Steer</button>
+          </div>
+        </div>
       </div>
     </aside>
 

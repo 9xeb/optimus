@@ -40,6 +40,7 @@ class State:
     actions: asyncio.Queue
     trajectory: list
     job: asyncio.Task
+    error: str          # last error
 
 # # # # class RecoveringReAct(dspy.ReAct):  
 # # # #     def __init__(self, signature, tools, max_iters=20):  

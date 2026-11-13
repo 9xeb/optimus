@@ -58,7 +58,8 @@ class Optimus():
             tokens=asyncio.Queue(),   # Main stream of all tokens out of RCS
             actions=asyncio.Queue(),  # High level actions being performed by RCS
             trajectory=[],            # The current execution trajectory, as a list of action strings
-            job=None                  # Backend ensures consistency against incoming requests
+            job=None,                 # Backend ensures consistency against incoming requests
+            error=None                # Frontend displays this in case of problemss
         )
         # Load memories from file
         if self.state.filepath and Path(self.state.filepath).exists():
@@ -111,7 +112,7 @@ class Optimus():
                                 "args": list(tool.args.keys())
                             }
                             for tool in mcp_tools
-                        ] + [{"disclaimer": "The tools above must run through the `run_tools` tool."}]
+                        ] + [{"reminder": "Remember to wrap tools around `run_tools`."}]
                         log_internal_event(f"[OPTIMUS] Listing tools: {list_of_tools}")
                         await self.state.actions.put({"task": self.state.current.title, "data": "Listing tools..."})
                         return list_of_tools
@@ -137,6 +138,16 @@ class Optimus():
                         Run a list of tools by name.
                         When iterating, submit the single largest list of calls possible.
                         """
+                        # Before any next tool call, let LLM observe mid-task tips once
+                        if len(self.state.tasks[self.state.current.title]["tips"]) > 0:
+                            # Propagate tips upwards
+                            self.state.tasks[self.state.parent.title]["tips"] += self.state.tasks[self.state.current.title]["tips"]
+                            output = f"Before you proceed, the user provided the following tips: {self.state.tasks[self.state.parent.title]["tips"]}."
+                            log_internal_event(f"[OPTIMUS] Some tips were found. {output}")
+                            # Consume local tips
+                            self.state.tasks[self.state.current.title]["tips"] = []
+                            return output
+
                         # Split as many tool calls as possible in multiple items in the call list.
                         # Split repetitive or looping operations into multiple items in the calls list.
                         list_flag = False   # track if tools already listed to avoid spam in the same batch
@@ -214,7 +225,7 @@ class Optimus():
 
                         log_internal_event(f"[OPTIMUS] Current trajectory: {self.state.tasks[self.state.parent.title]["trajectory"]}")
                         # LLM observes good calls and bad calls
-                        output += [{"reminder": "Always follow up "}]
+                        # output += [{"reminder": "Always follow up "}]
                         return output
                         
                     dynamic_tools = [
@@ -237,6 +248,7 @@ class Optimus():
             if isinstance(eg, BaseExceptionGroup):
                 for e in eg.exceptions:
                     # logger.exception("real error", exc_info=e)
+                    self.state.error = "Likely MCP connection problem."
                     log_error(f"Optimus critical error: {e}")
             else:
                 log_error(f"Optimus critical error: {eg}")
@@ -272,7 +284,7 @@ class Optimus():
 
             # Add tip (will be consumed at the next run of the task)
             if tip is not None:
-                self.state.tasks[task]["tips"] += [tip]
+                self.state.tasks[task]["examples"] += [tip]
                 self.state.tasks[task]["tier"] = 0
             return
 
@@ -286,7 +298,8 @@ class Optimus():
                 "state": "sleeping",
                 "tier": 1,  # starts at tier one to avoid refining nothing
                 "ttl": 60,  # 60 minutes by default
-                "tips": [],
+                "examples": [],     # consumed when refining task before start
+                "tips": [],         # consumed during task execution
                 "qna": [],
                 "trajectory": []
             }

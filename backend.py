@@ -111,7 +111,8 @@ async def tasks_page():
     """Get tasks network"""
     return {
         "tasks": optimus.state.tasks,
-        "situation": optimus.state.situation
+        "situation": optimus.state.situation,
+        "error": optimus.state.error
     }
 
 @app.post("/review")
@@ -124,7 +125,12 @@ async def review_situation(review: dict):
         optimus.state.resolution = review.get("review")
         optimus.state.event.set()
     else:
-        log_internal_event("[BACKEND] There are no pending situations")
+        # If there are no pending situation, review is injected in the current running agent
+        # This is called steering
+        log_internal_event(f"[BACKEND] There are no pending situations, steering agents with: [{review.get('review')}].")
+        optimus.state.tasks[optimus.state.current.title]["tips"] += [
+            review.get("review")
+        ]
 
 # @app.get("/", response_class=HTMLResponse)
 # async def home_page():

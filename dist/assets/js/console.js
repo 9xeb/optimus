@@ -32,6 +32,7 @@ const state = {
   layoutChanged: false,
   run: { id: null, pending: false },
   runPrompt: { open: false, taskId: null, tip: '', tipSaved: false, pending: false, error: null },
+  steer: { taskId: null, draft: '', pending: false, delivered: false, error: null, timer: null },
   mutation: { kind: null },
   form: { open: false, x: 0, y: 0, title: '', deps: [], error: null, pending: false, sourceId: null },
   link: { open: false, taskId: null, query: '', items: [], index: -1, error: null, pending: false },
@@ -1634,6 +1635,7 @@ function render() {
     }
   }
   renderInspector();
+  paintSteer();
   paintNodeActions();
   renderDeletePopover();
   paintRunPrompt();
@@ -2076,6 +2078,141 @@ function paintInspectorView() {
   state.inspectorLastPaintedTab = active;
 }
 
+/* ---- steering ---- */
+function resetSteer() {
+  if (state.steer.timer) clearTimeout(state.steer.timer);
+  state.steer = { taskId: null, draft: '', pending: false, delivered: false, error: null, timer: null };
+  const input = document.getElementById('inspector-steer-input');
+  if (input) input.value = '';
+}
+function steerTarget() {
+  if (state.situation) return null;
+  const awake = currentAwakeTask();
+  if (!awake || !state.selected || state.selected !== awake.id) return null;
+  return awake;
+}
+function growSteer(input) {
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight + 2, 120) + 'px';
+}
+function steerReason() {
+  if (state.error) return 'Backend unreachable';
+  if (state.steer.pending) return 'Sending…';
+  if (!state.steer.draft.trim()) return 'Type a steer first';
+  return '';
+}
+function paintSteer() {
+  const box = document.getElementById('inspector-steer');
+  if (!box) return;
+  if (state.steer.taskId && state.steer.taskId !== state.selected) resetSteer();
+  const owned = state.steer.taskId ? state.tasks.get(state.steer.taskId) : null;
+  if (state.steer.taskId && (!owned || owned.state !== 'awake')) resetSteer();
+  const target = steerTarget();
+  if (!target) {
+    box.classList.add('hidden');
+    return;
+  }
+  if (state.steer.taskId !== target.id) {
+    resetSteer();
+    state.steer.taskId = target.id;
+  }
+  const s = state.steer;
+  box.classList.remove('hidden');
+  const input = document.getElementById('inspector-steer-input');
+  if (!input.dataset.composing && input.value !== s.draft) {
+    input.value = s.draft;
+    growSteer(input);
+  }
+  input.readOnly = s.pending;
+  const reason = steerReason();
+  const submit = document.getElementById('inspector-steer-submit');
+  submit.setAttribute('aria-disabled', String(!!reason));
+  submit.textContent = s.pending ? 'Sending…' : 'Steer';
+  submit.title = reason || 'Send this steer to the running task';
+  submit.setAttribute('aria-label', reason
+    ? `Steer unavailable: ${reason}`
+    : 'Send steer to the running task');
+  const status = document.getElementById('inspector-steer-status');
+  const statusText = s.error
+    ? s.error
+    : s.delivered
+      ? 'Steered — delivered to the running task'
+      : s.pending
+        ? 'Sending…'
+        : state.error
+          ? 'Backend unreachable — steer disabled'
+          : 'Enter to send · Shift+Enter for a new line';
+  if (status.textContent !== statusText) status.textContent = statusText;
+  status.classList.toggle('error', !!(s.error || state.error));
+  status.classList.toggle('delivered', !s.error && !state.error && s.delivered);
+  if (s.error) status.title = s.error;
+  else status.removeAttribute('title');
+}
+async function submitSteer() {
+  const s = state.steer;
+  if (!s || !s.taskId || s.pending) return;
+  if (steerReason()) return;
+  const text = s.draft.trim();
+  if (!text) return;
+  const target = steerTarget();
+  if (!target || target.id !== s.taskId) {
+    s.error = 'The running task changed — steer not sent';
+    paintSteer();
+    return;
+  }
+  s.pending = true;
+  s.error = null;
+  s.delivered = false;
+  if (s.timer) { clearTimeout(s.timer); s.timer = null; }
+  paintSteer();
+  try {
+    await postReview({ review: text });
+    if (state.steer !== s) return;
+    s.pending = false;
+    s.draft = '';
+    s.error = null;
+    s.delivered = true;
+    if (s.timer) clearTimeout(s.timer);
+    s.timer = setTimeout(() => {
+      if (state.steer !== s) return;
+      s.delivered = false;
+      s.timer = null;
+      paintSteer();
+    }, 2500);
+    paintSteer();
+  } catch (e) {
+    if (state.steer !== s) return;
+    s.pending = false;
+    s.error = `Steer failed: ${humanError(e)}`;
+    paintSteer();
+  }
+}
+const steerInput = document.getElementById('inspector-steer-input');
+steerInput.addEventListener('input', e => {
+  const s = state.steer;
+  if (!s.taskId) return;
+  s.draft = e.target.value;
+  s.error = null;
+  if (s.delivered) {
+    s.delivered = false;
+    if (s.timer) { clearTimeout(s.timer); s.timer = null; }
+  }
+  growSteer(e.target);
+  paintSteer();
+});
+steerInput.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+  e.preventDefault();
+  submitSteer();
+});
+steerInput.addEventListener('compositionstart', () => { steerInput.dataset.composing = '1'; });
+steerInput.addEventListener('compositionend', () => {
+  delete steerInput.dataset.composing;
+  if (state.steer.taskId) state.steer.draft = steerInput.value;
+  paintSteer();
+});
+document.getElementById('inspector-steer-submit').onclick = submitSteer;
+
 function setInspectorTab(tab) {
   if (tab !== 'run' && tab !== 'report') return;
   if (state.inspectorTab === tab) return;
@@ -2501,7 +2638,14 @@ async function postReview(body) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(String(res.status));
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const data = await res.json();
+      detail = data && (data.detail || data.message || data.error) || '';
+    } catch (e) { /* no JSON detail */ }
+    throw new Error(detail ? `${res.status}: ${detail}` : String(res.status));
+  }
 }
 async function resolveSituation(body) {
   if (!state.situation || state.situationStatus !== 'idle' || state.error || state.stop.pending) return;
