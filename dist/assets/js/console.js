@@ -3,7 +3,7 @@ const TASKS_URL = '/tasks', REVIEW_URL = '/review', POLL_INTERVAL = 2000, DEFAUL
 const CANCEL_URL = '/tasks/cancel';
 const SANDBOX_URL = `http://${location.hostname || '127.0.0.1'}:8080/`;
 const STREAM_URL = '/tasks/stream';
-const STREAM_QUIET_MS = 2000, STREAM_STALL_MS = 15000;
+const PING_TIMEOUT_MS = 45000;
 const LABEL_MAX_CHARS = 22, LABEL_CHAR_W = 6.6, LABEL_LINE_H = 13, LABEL_GAP = 16;
 const EVENT_LABELS = { 'task-proposal': 'TASK', 'tool-approval': 'ACTION', 'question': 'QUESTION', 'review': 'REVIEW' };
 const EVENT_CLASSES = { 'task-proposal': 'event-task', 'tool-approval': 'event-action', 'question': 'event-question', 'review': 'event-review' };
@@ -44,6 +44,8 @@ const state = {
     status: 'idle',
     task: null,
     lastChunkAt: null,
+    lastPingAt: null,
+    connection: 'idle',
     chunkTimes: [],
     rate: 0,
     pulseTimer: null,
@@ -58,6 +60,7 @@ const state = {
   inspectorSig: null,
   inspectorTaskId: null,
   inspectorTrajectorySig: null,
+  inspectorTrajectoryCount: 0,
   inspectorInstruction: null,
   inspectorTab: 'run',
   inspectorResetRunTop: false,
@@ -66,6 +69,8 @@ const state = {
   trajectoryFollow: true,
   scrollGuardUntil: 0,
   error: null,
+  engineError: null,
+  metrics: { actions: 0, apm: 0 },
 };
 
 const reduceMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -87,6 +92,19 @@ function el(t, p = {}, c = []) {
 
 function normKind(k) { return k === 'root' ? 'root' : (k === 'complex' ? 'complex' : 'simple'); }
 function normState(s) { return s === 'awake' ? 'awake' : (s === 'failing' ? 'failing' : 'sleeping'); }
+function normMetric(v) { return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0; }
+function normMetrics(raw) {
+  const m = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return {
+    actions: normMetric(m.actions),
+    apm: normMetric(m.apm),
+  };
+}
+function normEngineError(raw) {
+  if (raw == null) return null;
+  const text = String(raw).trim();
+  return text || null;
+}
 function nodeRadius(t) { return t && (t.kind === 'root' || t.kind === 'complex') ? 26 : 18; }
 function ghostId(title) { return '__sit__:' + title; }
 
@@ -352,6 +370,8 @@ function applyEnvelope(env) {
     document.getElementById('run-popover').contains(document.activeElement)
   );
   state.tasks = applyTasks(env.tasks);
+  state.engineError = normEngineError(env.error);
+  state.metrics = normMetrics(env.metrics);
   const lostSelected = !!state.selected && !state.tasks.has(state.selected);
   if (state.gesture.mode !== 'idle') {
     const src = state.gesture.sourceId;
@@ -1451,6 +1471,7 @@ function paint() {
   nJoin.exit().remove();
   const ne = nJoin.enter().append('g').attr('class', 'node');
   ne.append('circle').attr('class', 'halo');
+  ne.append('circle').attr('class', 'work-ring');
   ne.append('circle').attr('class', 'ring2');
   ne.append('circle').attr('class', 'anchor-ring');
   ne.append('circle').attr('class', 'core');
@@ -1467,6 +1488,7 @@ function paint() {
     const r = d.r;
     sel.select('.core').attr('r', r);
     sel.select('.halo').attr('r', r + 9);
+    sel.select('.work-ring').attr('r', r + 13);
     sel.select('.ring2').attr('r', r + 5);
     sel.select('.anchor-ring').attr('r', r + 13);
     sel.select('.selection-ring').attr('r', r + 8);
@@ -1496,7 +1518,10 @@ function paint() {
     if (reviewAnchor && d.id === reviewAnchor) cls.push('review');
     if (findActive && state.find.matches.includes(d.id)) cls.push('match');
     if (currentMatch === d.id) cls.push('match-current');
-    if (state.stream.status === 'open' && state.stream.task === d.id) cls.push('live');
+    if (state.stream.status !== 'idle' && state.stream.task === d.id && d.state === 'awake') {
+      cls.push('run');
+      if (streamConnectionState() === 'reconnecting') cls.push('reconnecting');
+    }
     if (d.id === state.selected) cls.push('selected');
     if (d.unread) cls.push('unread');
     if (d.context) cls.push('context-root');
@@ -1607,6 +1632,7 @@ function paint() {
 }
 
 function render() {
+  paintEngineError();
   paintMode();
   const needMap = state.mode !== 'sandbox' || state.find.open;
   const freeze = state.gesture.mode !== 'idle' || state.form.open;
@@ -1640,6 +1666,7 @@ function render() {
   renderDeletePopover();
   paintRunPrompt();
   paintTop();
+  paintMetrics();
   paintStop();
   renderComposer();
   paintFind();
@@ -1664,14 +1691,65 @@ function paintMode() {
   link.classList.toggle('hidden', !sandbox);
 }
 
+function compactCount(n) {
+  const v = Number(n) || 0;
+  if (v >= 1e6) return `${(v / 1e6).toFixed(1).replace(/\.0$/, '')}M`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(1).replace(/\.0$/, '')}k`;
+  return String(Math.round(v));
+}
+function exactCount(n) {
+  return Math.round(Number(n) || 0).toLocaleString();
+}
+function formatApm(n) {
+  const v = Number(n);
+  return Number.isFinite(v) ? v.toFixed(1) : '0.0';
+}
+function paintMetrics() {
+  const box = document.getElementById('metrics');
+  if (!box) return;
+  const m = state.metrics;
+  const sig = `${m.actions}|${m.apm}`;
+  if (box.dataset.sig === sig) return;
+  box.dataset.sig = sig;
+  const actions = Math.round(Number(m.actions) || 0);
+  const apm = formatApm(m.apm);
+  document.getElementById('metric-actions-full').textContent = exactCount(actions);
+  document.getElementById('metric-actions-short').textContent = compactCount(actions);
+  document.getElementById('metric-apm').textContent = apm;
+  const name = `${exactCount(actions)} actions · ${apm} actions per minute`;
+  box.title = name;
+  box.setAttribute('aria-label', name);
+  box.classList.toggle('zero', actions === 0 && Number(m.apm) === 0);
+}
+function paintEngineError() {
+  const box = document.getElementById('engine-error');
+  if (!box) return;
+  const show = !!state.engineError;
+  const was = !box.classList.contains('hidden');
+  if (show) {
+    if (box.textContent !== state.engineError) box.textContent = state.engineError;
+    box.classList.remove('hidden');
+    box.classList.toggle('stale', !!state.error);
+    if (state.error) box.setAttribute('aria-description', 'last known');
+    else box.removeAttribute('aria-description');
+  } else {
+    if (box.textContent) box.textContent = '';
+    box.classList.add('hidden');
+    box.classList.remove('stale');
+    box.removeAttribute('aria-description');
+  }
+  if (show !== was && state.mode !== 'sandbox') state.fitPending = true;
+}
 function paintTop() {
   const st = document.getElementById('status'), s = document.getElementById('status-text');
   const awake = awakeCount() > 0;
-  st.classList.toggle('error', !!state.error);
-  st.classList.toggle('busy', !state.error && awake);
-  document.getElementById('brand').classList.toggle('busy', !state.error && awake);
-  st.title = state.error ? 'backend unreachable' : (awake ? 'engine working' : 'connected');
-  s.textContent = state.error ? 'backend unreachable' : '';
+  const problem = state.error ? 'backend unreachable' : state.engineError ? 'engine error' : '';
+  st.classList.toggle('error', !!problem);
+  st.classList.toggle('busy', !problem && awake);
+  document.getElementById('brand').classList.toggle('busy', !problem && awake);
+  st.title = problem || (awake ? 'engine working' : 'connected');
+  st.setAttribute('aria-label', problem || (awake ? 'engine working' : 'connected'));
+  s.textContent = problem;
 }
 
 function paintBreadcrumb() {
@@ -1711,23 +1789,23 @@ function normalizeAction(text) {
     .replace(/\s+/g, ' ')
     .trim();
 }
+function decodeStreamData(raw) {
+  const text = String(raw == null ? '' : raw).trim();
+  if (!text) return '';
+  if (text.startsWith('"') && text.endsWith('"')) {
+    try {
+      const value = JSON.parse(text);
+      if (typeof value === 'string') return value;
+    } catch (e) { /* keep raw */ }
+  }
+  return raw;
+}
 function activityDotState(taskId) {
-  const s = state.stream;
   if (!taskId) return 'idle';
-  if (s.task !== taskId) return 'quiet';
-  if (s.status === 'open' || s.status === 'connecting') {
-    if (s.lastChunkAt) {
-      const age = Date.now() - s.lastChunkAt;
-      if (age >= STREAM_STALL_MS) return 'stalled';
-      if (age >= STREAM_QUIET_MS) return 'quiet';
-    }
-    return 'live';
-  }
-  if (s.lastChunkAt) {
-    const age = Date.now() - s.lastChunkAt;
-    if (age >= STREAM_STALL_MS) return 'stalled';
-  }
-  return 'quiet';
+  const conn = streamConnectionState();
+  if (conn === 'reconnecting') return 'reconnecting';
+  if (conn === 'connected') return 'connected';
+  return 'connecting';
 }
 function paintActivity() {
   const strip = document.getElementById('activity');
@@ -1953,11 +2031,21 @@ function setInspectorScroll(box, value) {
   box.scrollTop = value;
 }
 function scrollLatestTrajectory(box) {
-  const latest = box.querySelector('.trajectory-step:last-child');
+  const latest = box.querySelector('#trajectory-running') || box.querySelector('.trajectory-step:last-child');
   if (!latest) return;
   const c = box.getBoundingClientRect(), r = latest.getBoundingClientRect();
   if (r.top < c.top) setInspectorScroll(box, box.scrollTop + (r.top - c.top - 6));
   else if (r.bottom > c.bottom) setInspectorScroll(box, box.scrollTop + (r.bottom - c.bottom + 6));
+}
+function pulseGhostDot() {
+  if (reduceMotion()) return;
+  const dot = document.getElementById('inspector-running-dot');
+  if (!dot) return;
+  dot.classList.remove('ping');
+  void dot.offsetWidth;
+  dot.classList.add('ping');
+  clearTimeout(pulseGhostDot.timer);
+  pulseGhostDot.timer = setTimeout(() => dot.classList.remove('ping'), 900);
 }
 function renderInspector() {
   const panel = document.getElementById('inspector');
@@ -1970,6 +2058,7 @@ function renderInspector() {
     state.inspectorSig = null;
     state.inspectorTaskId = null;
     state.inspectorTrajectorySig = null;
+    state.inspectorTrajectoryCount = 0;
     state.inspectorInstruction = null;
     state.inspectorLastPaintedTab = null;
     return;
@@ -1982,7 +2071,9 @@ function renderInspector() {
   const instruction = t.instruction || '';
   const traj = t.trajectory || [];
   const trajSig = traj.join('\n');
-  const sig = `${t.id}::${instruction}::${t.report || ''}::${t.reportAt || ''}::${trajSig}`;
+  const conn = streamConnectionState();
+  const situation = !!state.situation;
+  const sig = `${t.id}::${instruction}::${t.report || ''}::${t.reportAt || ''}::${trajSig}::${t.state}::${conn}::${situation ? 'sit' : 'nosit'}`;
   if (sig !== state.inspectorSig) {
     const same = state.inspectorTaskId === t.id;
     const taskChanged = !same;
@@ -1991,6 +2082,7 @@ function renderInspector() {
     const resetTrajectory = trajChanged && traj.length === 0;
     const resetRun = taskChanged || state.inspectorResetRunTop;
     const resetReport = taskChanged || state.inspectorResetReportTop;
+    const grew = same && traj.length > state.inspectorTrajectoryCount;
     const oldRunScroll = runPanel.scrollTop;
     const oldReportScroll = reportPanel.scrollTop;
     const oldRunH = runPanel.scrollHeight;
@@ -1998,6 +2090,7 @@ function renderInspector() {
     state.inspectorSig = sig;
     state.inspectorTaskId = t.id;
     state.inspectorTrajectorySig = trajSig;
+    state.inspectorTrajectoryCount = traj.length;
     state.inspectorInstruction = instruction;
     state.inspectorResetRunTop = false;
     state.inspectorResetReportTop = false;
@@ -2008,13 +2101,39 @@ function renderInspector() {
         ? el('div', { class: 'task-text', text: instruction })
         : el('div', { class: 'task-empty', text: 'No instructions' }),
     ]);
+    const connLabel = conn === 'reconnecting' ? 'Live updates reconnecting'
+      : conn === 'connected' ? 'Live updates connected'
+        : 'Live updates connecting';
+    const trajLabel = el('div', { class: 'inspector-label trajectory-label' }, [
+      el('span', { text: 'Trajectory' }),
+      t.state === 'awake' ? el('span', {
+        class: `trajectory-conn ${conn}`,
+        id: 'trajectory-conn',
+        role: 'img',
+        title: connLabel,
+        'aria-label': connLabel,
+      }) : null,
+    ]);
     const trajBlock = el('section', {}, [
-      el('div', { class: 'inspector-label', text: 'Trajectory' }),
+      trajLabel,
       traj.length
-        ? el('ol', { class: 'trajectory-list' }, traj.map(step => el('li', { class: 'trajectory-step', text: step })))
+        ? el('ol', { class: 'trajectory-list' }, traj.map((step, i) => el('li', {
+          class: `trajectory-step${grew && i === traj.length - 1 ? ' new-step' : ''}`,
+          text: step,
+        })))
         : el('div', { class: 'trajectory-empty', text: 'No trajectory yet' }),
     ]);
-    runPanel.replaceChildren(taskBlock, trajBlock);
+    const runningText = situation ? 'Waiting for your input…'
+      : conn === 'reconnecting' ? 'Reconnecting live updates…'
+        : conn === 'connected' ? 'Still working…'
+          : 'Connecting live updates…';
+    const runningBlock = t.state === 'awake'
+      ? el('div', { class: `trajectory-running ${conn}${situation ? ' waiting' : ''}`, id: 'trajectory-running' }, [
+        el('span', { class: 'trajectory-running-dot', id: 'inspector-running-dot' }),
+        el('span', { class: 'trajectory-running-label', text: runningText }),
+      ])
+      : null;
+    runPanel.replaceChildren(taskBlock, trajBlock, ...(runningBlock ? [runningBlock] : []));
     reportPanel.replaceChildren();
     if (t.report) reportPanel.append(renderReport(t.report));
     else reportPanel.append(el('div', { class: 'inspector-empty', id: 'inspector-empty', text: 'No report yet.' }));
@@ -2228,7 +2347,7 @@ function setInspectorTab(tab) {
 document.getElementById('inspector-run-panel').addEventListener('scroll', () => {
   if (!state.selected || state.inspectorTab !== 'run' || performance.now() < state.scrollGuardUntil) return;
   const box = document.getElementById('inspector-run-panel');
-  const latest = box.querySelector('.trajectory-step:last-child');
+  const latest = box.querySelector('#trajectory-running') || box.querySelector('.trajectory-step:last-child');
   if (!latest) return;
   const c = box.getBoundingClientRect(), r = latest.getBoundingClientRect();
   state.trajectoryFollow = r.bottom > c.top && r.top < c.bottom;
@@ -2248,6 +2367,7 @@ function closeInspector() {
   state.inspectorSig = null;
   state.inspectorTaskId = null;
   state.inspectorTrajectorySig = null;
+  state.inspectorTrajectoryCount = 0;
   state.trajectoryFollow = true;
   state.deleteConfirm = { open: false, pending: false, error: null };
   state.runPrompt = { open: false, taskId: null, tip: '', tipSaved: false, pending: false, error: null };
@@ -2263,6 +2383,7 @@ function overview() {
   state.inspectorSig = null;
   state.inspectorTaskId = null;
   state.inspectorTrajectorySig = null;
+  state.inspectorTrajectoryCount = 0;
   state.trajectoryFollow = true;
   state.deleteConfirm = { open: false, pending: false, error: null };
   state.runPrompt = { open: false, taskId: null, tip: '', tipSaved: false, pending: false, error: null };
@@ -2295,6 +2416,7 @@ function selectNode(id) {
     state.inspectorSig = null;
     state.inspectorTaskId = null;
     state.inspectorTrajectorySig = null;
+    state.inspectorTrajectoryCount = 0;
     state.inspectorInstruction = null;
     state.inspectorTab = (t.state === 'awake' || !t.report) ? 'run' : 'report';
     state.inspectorResetRunTop = false;
@@ -2930,6 +3052,16 @@ document.addEventListener('keydown', e => {
 /* ---- token heartbeat ---- */
 let streamAbort = null, streamRetryTimer = null, streamBackoff = 1000;
 
+function streamConnectionState() {
+  const s = state.stream;
+  if (s.status === 'idle') return 'idle';
+  if (s.status === 'connecting') return 'connecting';
+  if (s.status === 'ended') return 'reconnecting';
+  const age = s.lastPingAt ? Date.now() - s.lastPingAt : null;
+  if (age == null || age >= PING_TIMEOUT_MS) return 'reconnecting';
+  return 'connected';
+}
+
 function syncStream() {
   const awake = currentAwakeTask();
   if (!awake || document.hidden) {
@@ -2951,6 +3083,7 @@ function connectStream() {
   }
   s.task = awake.id;
   s.lastChunkAt = null;
+  s.lastPingAt = null;
   s.chunkTimes = [];
   s.rate = 0;
   if (s.pulseTimer) { clearTimeout(s.pulseTimer); s.pulseTimer = null; }
@@ -2977,6 +3110,7 @@ async function runStream(ctrl) {
     }
     if (!res.ok || !res.body) throw new Error(String(res.status));
     s.status = 'open';
+    s.lastPingAt = Date.now();
     streamBackoff = 1000;
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -2999,15 +3133,26 @@ async function runStream(ctrl) {
   }
 }
 function handleFrame(frame) {
-  let event = '';
+  let event = '', commented = false;
   const data = [];
   for (const line of frame.split('\n')) {
     if (!line) continue;
-    if (line.startsWith(':')) continue;
+    if (line.startsWith(':')) { commented = true; continue; }
     if (line.startsWith('event:')) event = line.slice(6).trim();
     else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
   }
-  if (event) onChunk(event, data.join('\n'));
+  if (commented) onPing();
+  if (event) onChunk(event, decodeStreamData(data.join('\n')));
+}
+function onPing() {
+  const s = state.stream;
+  s.lastPingAt = Date.now();
+  emitPingPulse(s.task);
+  if (s.connection !== 'connected') {
+    s.connection = 'connected';
+    render();
+  }
+  pulseGhostDot();
 }
 function onChunk(task, rawAction) {
   const s = state.stream;
@@ -3020,7 +3165,10 @@ function onChunk(task, rawAction) {
     streamRefreshSoon();
   }
   const text = normalizeAction(rawAction);
-  if (text) s.action = { task, text, at: now };
+  if (text) {
+    s.action = { task, text, at: now };
+    streamRefreshSoon();
+  }
   s.lastChunkAt = now;
   s.chunkTimes.push(now);
   schedulePulse();
@@ -3046,6 +3194,23 @@ function emitPulse(taskId) {
       .duration(650)
       .ease(d3.easeCubicOut)
       .attr('r', r + 34)
+      .attr('opacity', 0)
+      .remove();
+  });
+}
+function emitPingPulse(taskId) {
+  if (reduceMotion() || !taskId) return;
+  nodeL.selectAll('g.node').filter(d => d.id === taskId).each(function () {
+    const core = d3.select(this).select('.core');
+    const r = +core.attr('r') || 18;
+    d3.select(this).append('circle')
+      .attr('class', 'ping-pulse')
+      .attr('r', r + 10)
+      .attr('opacity', .35)
+      .transition()
+      .duration(900)
+      .ease(d3.easeCubicOut)
+      .attr('r', r + 20)
       .attr('opacity', 0)
       .remove();
   });
@@ -3081,35 +3246,33 @@ function closeStream() {
   if (s.pulseTimer) { clearTimeout(s.pulseTimer); s.pulseTimer = null; }
   s.status = 'idle';
   s.task = null;
+  s.lastChunkAt = null;
+  s.lastPingAt = null;
+  s.connection = 'idle';
   s.chunkTimes = [];
   s.rate = 0;
-  s.lastChunkAt = null;
   s.action = null;
   s.activitySig = null;
-  nodeL.selectAll('.token-pulse').remove();
-  updateNodeActivity(0, Date.now());
+  nodeL.selectAll('.token-pulse, .ping-pulse').remove();
+  updateNodeActivity(Date.now());
   paintActivity();
 }
-function updateNodeActivity(level, now) {
+function updateNodeActivity(now) {
   const s = state.stream;
   const action = s.action && s.task && s.action.task === s.task ? s.action.text : '';
+  const conn = streamConnectionState();
   nodeL.selectAll('g.node.state-awake').each(function (d) {
-    const on = s.status === 'open' && s.task === d.id;
-    const age = s.lastChunkAt ? now - s.lastChunkAt : null;
-    const quiet = on && age != null && age >= STREAM_QUIET_MS;
-    const stalled = on && age != null && age >= STREAM_STALL_MS;
+    const on = s.status !== 'idle' && s.task === d.id;
+    const reconnecting = on && conn === 'reconnecting';
     const sel = d3.select(this);
-    sel.classed('live', on);
-    sel.classed('quiet', quiet);
-    sel.classed('stalled', stalled);
-    if (on) sel.style('--activity', String(level));
-    else sel.style('--activity', null);
+    sel.classed('run', on);
+    sel.classed('reconnecting', reconnecting);
     if (!on) {
       sel.attr('aria-description', null);
       sel.node().__descAt = 0;
       return;
     }
-    const base = stalled ? 'Output has been quiet for a while' : 'Engine is working';
+    const base = reconnecting ? 'Live updates are reconnecting' : 'Engine is working';
     const desc = action ? `${base}: ${action}` : base;
     const prev = sel.attr('aria-description');
     if (desc !== prev && (now - (sel.node().__descAt || 0) >= 1000 || !prev)) {
@@ -3124,8 +3287,12 @@ function tickHeartbeat() {
   s.chunkTimes = s.chunkTimes.filter(t => now - t < 3000);
   const instant = s.chunkTimes.filter(t => now - t < 1000).length;
   s.rate = s.rate * 0.7 + instant * 0.3;
-  const live = s.status === 'open' && s.task;
-  updateNodeActivity(live ? Math.min(1, s.rate / 8) : 0, now);
+  const conn = streamConnectionState();
+  if (conn !== s.connection) {
+    s.connection = conn;
+    render();
+  }
+  updateNodeActivity(now);
   paintActivity();
 }
 

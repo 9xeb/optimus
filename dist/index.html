@@ -24,6 +24,19 @@
         <span class="brand-sub">CONSOLE</span>
       </h1>
     </div>
+    <span id="metrics" class="metrics" role="group" aria-label="Engine action metrics">
+      <span class="metric-actions">
+        <span class="metric-count metric-count-full" id="metric-actions-full" aria-hidden="true">0</span>
+        <span class="metric-count metric-count-short" id="metric-actions-short" aria-hidden="true">0</span>
+        <span class="metric-label metric-label-full" aria-hidden="true">actions</span>
+        <span class="metric-label metric-label-short" aria-hidden="true">act</span>
+      </span>
+      <span class="metric-divider" aria-hidden="true">·</span>
+      <span class="metric-apm">
+        <span class="metric-apm-value" id="metric-apm" aria-hidden="true">0.0</span>
+        <span class="metric-label" aria-hidden="true">apm</span>
+      </span>
+    </span>
     <div class="topbar-actions">
       <button id="stop-all" class="btn tiny ghost danger" type="button" aria-haspopup="dialog" aria-expanded="false" aria-disabled="true" aria-label="Stop all tasks: Nothing is running" title="Nothing is running">
         <span class="stop-label-full">Stop all</span>
@@ -43,6 +56,8 @@
       </div>
     </div>
   </header>
+
+  <div id="engine-error" class="hidden" role="alert" aria-live="assertive"></div>
 
   <main id="stage">
     <div id="map-pane">

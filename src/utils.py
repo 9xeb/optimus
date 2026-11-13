@@ -23,6 +23,16 @@ class Task:
     # # # #         self.dependencies = []
 
 @dataclass
+class Metrics:
+    """Model metrics"""
+    last_action_time: float = None
+    actions: int = 0
+    apm: float = 0
+    # prompt_tokens: int = 0
+    # completion_tokens: int = 0
+    # prompt_tps: int = 0
+    # completion_tps: int = 0
+@dataclass
 class State:
     """The state of an Optimus instance"""
     filepath: str   # where to persist memory
@@ -41,6 +51,7 @@ class State:
     trajectory: list
     job: asyncio.Task
     error: str          # last error
+    metrics: Metrics    # track RCS metrics
 
 # # # # class RecoveringReAct(dspy.ReAct):  
 # # # #     def __init__(self, signature, tools, max_iters=20):  
@@ -74,6 +85,19 @@ class State:
 # # # #                     return self._recover(err)  
   
 # # # #         self.react = _RecoveringPredict(self.react)
+
+def update_action_metrics(state: State, action_count: int):
+    # Update action metrics
+    state.metrics.actions += action_count
+    if state.metrics.last_action_time is not None:
+        # avg between current apm and new apm
+        state.metrics.apm = (
+            state.metrics.apm + (
+               action_count / (time.time() - state.metrics.last_action_time)
+            )
+        ) / 2.0
+    state.metrics.last_action_time = time.time()
+
 
 def prettify_chunk(chunk: dspy.streaming.StreamResponse):
     """Wrap a chunk with colors"""
@@ -148,6 +172,7 @@ def require_approval(state: State, func, name):
         if not state.resolution:    # No feedback from user = approved
             # state.trajectory += [state.justification]
             state.tasks[state.parent.title]["trajectory"] += [state.justification]
+            state.tasks[state.current.title]["trajectory"] += [state.justification]
             return await func(**kwargs)
         else:
             log_error(f"Tool '{name}' call denied: {kwargs}. Reason: {state.resolution}")

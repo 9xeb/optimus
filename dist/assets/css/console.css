@@ -38,6 +38,16 @@
   .status.busy .led { animation: statusbreathe 1.5s ease-in-out infinite; }
   .status.error .led { background: var(--failing); box-shadow: 0 0 8px var(--failing); animation: none; }
   .status.error { color: var(--failing); }
+  .metrics { display: flex; align-items: center; gap: 6px; padding-left: 12px; border-left: 1px solid var(--border); font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .metric-actions, .metric-apm { display: inline-flex; align-items: baseline; gap: 4px; }
+  .metric-count { color: var(--text); }
+  .metric-count-short, .metric-label-short { display: none; }
+  .metric-label { color: var(--text-faint); }
+  .metric-divider { color: var(--text-faint); }
+  .metrics.zero { opacity: .5; }
+  #engine-error { flex: 0 0 auto; max-height: 84px; overflow-y: auto; padding: 8px 18px; background: rgba(255,77,94,.10); border-bottom: 1px solid rgba(255,77,94,.35); color: #ffc0c6; font-family: var(--mono); font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+  #engine-error.hidden { display: none; }
+  #engine-error.stale { opacity: .55; }
   @keyframes statusbreathe { 0%,100% { opacity: .35; } 50% { opacity: 1; } }
   .btn { font-family: var(--sans); font-size: 12.5px; cursor: pointer; border-radius: 8px; padding: 8px 14px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--text); }
   .btn:hover { border-color: var(--accent); }
@@ -65,8 +75,12 @@
   }
   @media (max-width: 380px) {
     .brand-wordmark { display: none; }
-    #topbar { gap: 8px; padding: 10px 12px; }
+    #topbar { gap: 6px; padding: 10px 12px; }
     .topbar-actions { gap: 6px; }
+    .metrics { font-size: 9.5px; gap: 5px; padding-left: 0; border-left: 0; }
+    .metric-count-full, .metric-label-full { display: none; }
+    .metric-count-short, .metric-label-short { display: inline; }
+    #status-text { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
   }
 
   #stage { position: relative; flex: 1; min-height: 0; display: flex; overflow: hidden; }
@@ -115,6 +129,21 @@
   .trajectory-step { position: relative; padding-left: 24px; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
   .trajectory-step::before { counter-increment: trajectory-step; content: counter(trajectory-step); position: absolute; left: 0; top: 1px; width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--text-dim); font-size: 9px; line-height: 14px; text-align: center; }
   .trajectory-empty { font-size: 12px; color: var(--text-faint); font-style: italic; }
+  .trajectory-label { display: flex; align-items: center; gap: 8px; position: sticky; top: 0; z-index: 1; margin: 0 0 4px; padding: 4px 0 6px; background: rgba(14,21,34,.97); }
+  .trajectory-conn { width: 6px; height: 6px; border-radius: 50%; background: var(--awake); box-shadow: 0 0 6px rgba(53,208,255,.55); }
+  .trajectory-conn.connecting { opacity: .55; }
+  .trajectory-conn.idle { opacity: .4; }
+  .trajectory-conn.reconnecting { background: var(--warn); box-shadow: 0 0 6px rgba(251,191,36,.6); }
+  .trajectory-running { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-left: 24px; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--text-dim); }
+  .trajectory-running-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--awake); box-shadow: 0 0 6px rgba(53,208,255,.55); animation: statusbreathe 3.2s ease-in-out infinite; }
+  .trajectory-running-dot.ping { animation: ghostping .9s ease-out; }
+  .trajectory-running.reconnecting { color: var(--warn); }
+  .trajectory-running.reconnecting .trajectory-running-dot { background: var(--warn); box-shadow: 0 0 6px rgba(251,191,36,.65); animation: statusbreathe 1.7s ease-in-out infinite; }
+  .trajectory-running.waiting { color: var(--question); }
+  .trajectory-running.waiting .trajectory-running-dot { background: var(--question); box-shadow: 0 0 6px rgba(95,168,255,.6); animation: statusbreathe 3.2s ease-in-out infinite; }
+  .trajectory-step.new-step { animation: stepflash 1.6s ease-out; border-radius: 4px; }
+  @keyframes ghostping { 0% { transform: scale(1.6); box-shadow: 0 0 10px rgba(53,208,255,.9); } 100% { transform: scale(1); box-shadow: 0 0 6px rgba(53,208,255,.55); } }
+  @keyframes stepflash { 0% { background: rgba(53,208,255,.16); } 100% { background: transparent; } }
   #inspector-steer { flex: 0 0 auto; display: flex; flex-direction: column; gap: 7px; padding: 12px 18px 14px; border-top: 1px solid var(--border); background: var(--bg-2); }
   #inspector-steer.hidden { display: none; }
   #inspector-steer .inspector-label { margin: 0; }
@@ -151,6 +180,8 @@
     #find-input { width: min(52vw, 300px); }
     #activity { min-height: 28px; padding: 0 14px; font-size: 11.5px; }
     #activity .activity-task { max-width: 38%; }
+    .metrics { font-size: 10px; gap: 6px; padding-left: 0; border-left: 0; }
+    #engine-error { padding: 8px 14px; }
   }
 
   /* graph */
@@ -180,9 +211,11 @@
   .node.state-sleeping .label { fill: var(--text-faint); }
   .node.state-awake .core { fill: #062b3a; stroke: var(--awake); }
   .node.state-awake .halo { fill: var(--awake); opacity: .12; animation: breathe 1.7s ease-in-out infinite; }
-  .node.state-awake.live .halo { animation: none; opacity: calc(.10 + var(--activity, 0) * .40); transition: opacity .18s linear; }
-  .node.state-awake.quiet .halo { animation: breathe 3.2s ease-in-out infinite; }
-  .node.state-awake.stalled .halo { fill: var(--warn); opacity: .18; animation: breathe 1.7s ease-in-out infinite; }
+  .node .work-ring { display: none; fill: none; stroke: var(--awake); stroke-width: 1.5; stroke-dasharray: 4 9; opacity: .45; pointer-events: none; animation: workring 7s linear infinite; }
+  .node.run .work-ring { display: block; }
+  .node.reconnecting .work-ring { stroke: var(--warn); opacity: .7; }
+  .node.reconnecting .halo { fill: var(--warn); opacity: .16; animation: breathe 1.7s ease-in-out infinite; }
+  .node .ping-pulse { fill: none; stroke: var(--awake); stroke-width: 1.5; pointer-events: none; }
   .node.state-awake .label { fill: #b8ecff; }
   .node.state-failing .core { fill: #2a0b12; stroke: var(--failing); }
   .node.state-failing .halo { fill: var(--failing); opacity: .16; animation: breathe 1.05s ease-in-out infinite; }
@@ -193,6 +226,7 @@
   .node.review .halo { display: block; fill: var(--warn); opacity: .10; animation: reviewpulse 2.6s ease-in-out infinite; }
   @keyframes reviewpulse { 0%, 100% { opacity: .08; } 50% { opacity: .26; } }
   @keyframes breathe { 0%,100% { opacity: .10; } 50% { opacity: .30; } }
+  @keyframes workring { to { stroke-dashoffset: -26; } }
   .node.kind-simple .ring2 { display: none; }
   .node.kind-complex .core { stroke-width: 2.4; }
   .node.kind-complex .ring2 { display: block; stroke: var(--border-2); stroke-dasharray: 3 4; opacity: .8; }
@@ -251,9 +285,9 @@
   /* activity strip */
   #activity { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 18px; background: var(--bg-2); border-top: 1px solid var(--border); font-family: var(--mono); font-size: 12px; color: var(--text-dim); overflow: hidden; white-space: nowrap; }
   #activity .activity-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); opacity: .7; }
-  #activity .activity-dot.live { background: var(--awake); opacity: 1; box-shadow: 0 0 8px var(--awake); animation: statusbreathe 1.5s ease-in-out infinite; }
-  #activity .activity-dot.quiet { background: var(--awake); opacity: .5; animation: statusbreathe 3.2s ease-in-out infinite; }
-  #activity .activity-dot.stalled { background: var(--warn); opacity: 1; box-shadow: 0 0 8px rgba(251,191,36,.7); animation: statusbreathe 1.7s ease-in-out infinite; }
+  #activity .activity-dot.connected { background: var(--awake); opacity: .9; box-shadow: 0 0 8px var(--awake); animation: statusbreathe 3.2s ease-in-out infinite; }
+  #activity .activity-dot.connecting { background: var(--awake); opacity: .5; animation: statusbreathe 3.2s ease-in-out infinite; }
+  #activity .activity-dot.reconnecting { background: var(--warn); opacity: 1; box-shadow: 0 0 8px rgba(251,191,36,.7); animation: statusbreathe 1.7s ease-in-out infinite; }
   #activity .activity-task { flex: 0 1 auto; max-width: 42%; min-width: 0; padding: 0; border: 0; background: none; font: inherit; color: var(--text); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: underline dotted; text-underline-offset: 2px; }
   #activity .activity-task:hover { color: var(--accent); text-decoration-color: var(--accent); }
   #activity .activity-task:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 3px; }

@@ -2,6 +2,7 @@ import asyncio
 from dataclasses import dataclass, field
 import json
 import os
+import time
 from pathlib import Path
 
 import numpy
@@ -11,7 +12,7 @@ import mlflow
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
-from src.utils import require_approval, State, Task
+from src.utils import require_approval, State, Task, Metrics, update_action_metrics
 from src.log import log_internal_event, log_error
 
 from src.ctxseg import RCS
@@ -33,7 +34,7 @@ class Optimus():
         )
         # dspy.configure(lm=self.lm, callbacks=[LoggingCallback()])      # set default provider locally, can override with dspy.context
         # dspy.configure(lm=lm, adapter=dspy.ChatAdapter(use_native_function_calling=True))
-        dspy.configure(lm=lm, adapter=dspy.JSONAdapter())
+        dspy.configure(lm=lm, adapter=dspy.JSONAdapter(), track_usage=True)
         dspy.disable_litellm_logging()
 
         # Setup mlflow integration
@@ -59,7 +60,8 @@ class Optimus():
             actions=asyncio.Queue(),  # High level actions being performed by RCS
             trajectory=[],            # The current execution trajectory, as a list of action strings
             job=None,                 # Backend ensures consistency against incoming requests
-            error=None                # Frontend displays this in case of problemss
+            error=None,               # Frontend displays this in case of problems
+            metrics=Metrics()         # RCS metrics (token usage and tokens per second)
         )
         # Load memories from file
         if self.state.filepath and Path(self.state.filepath).exists():
@@ -106,6 +108,7 @@ class Optimus():
 
                     async def list_tools():
                         """Get the list of available tools."""
+                        update_action_metrics(state=self.state, action_count=1)
                         list_of_tools = [
                             {
                                 "name": tool.name,
@@ -118,6 +121,7 @@ class Optimus():
                         return list_of_tools
                     async def describe_tools(names: list[str]):
                         """Get descriptions of the most promising tools, by tool name."""
+                        update_action_metrics(state=self.state, action_count=1)
                         match = [tool for tool in mcp_tools if tool.name in names]
                         log_internal_event(f"[OPTIMUS] Discovered tools: {match}")
                         # await self.state.actions.put({"task": self.state.current.title, "data": "Describing tools..."})
@@ -138,6 +142,8 @@ class Optimus():
                         Run a list of tools by name.
                         When iterating, submit the single largest list of calls possible.
                         """
+                        update_action_metrics(state=self.state, action_count=len(calls))
+
                         # Before any next tool call, let LLM observe mid-task tips once
                         if len(self.state.tasks[self.state.current.title]["tips"]) > 0:
                             # Propagate tips upwards
@@ -173,6 +179,7 @@ class Optimus():
                                             # Add to trajectory without approval
                                             # self.state.trajectory += [call.goal]
                                             self.state.tasks[self.state.parent.title]["trajectory"] += [call.goal]
+                                            self.state.tasks[self.state.current.title]["trajectory"] += [call.goal]
                                         else:
                                             # Wait for user approval
                                             log_internal_event(f"[OPTIMUS] Tool call [{call.name}] advertised as a change. Requiring approval.")
@@ -248,7 +255,7 @@ class Optimus():
             if isinstance(eg, BaseExceptionGroup):
                 for e in eg.exceptions:
                     # logger.exception("real error", exc_info=e)
-                    self.state.error = "Likely MCP connection problem."
+                    self.state.error = "Probable MCP connection problem."
                     log_error(f"Optimus critical error: {e}")
             else:
                 log_error(f"Optimus critical error: {eg}")

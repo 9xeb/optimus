@@ -6,9 +6,10 @@ from pathlib import Path
 
 import numpy
 import dspy
+# from dspy.utils.usage_tracker import track_usage  
 
 from src.log import log_internal_event, log_error
-from src.utils import stream_dspy_program, State, Task
+from src.utils import stream_dspy_program, State, Task, update_action_metrics
 
 class RCS(dspy.Module):
     """
@@ -81,6 +82,7 @@ class RCS(dspy.Module):
         3. When the root task is done, waits for user review in self.state
         4. If review is not empty, grow a new root task dependent on the previous root task        
         """
+        self.state.error = None
         try:
             # # Reset ephemeral dependencies
             for existing_task in list(self.state.tasks.keys()):
@@ -138,12 +140,12 @@ class RCS(dspy.Module):
                         self.state.tasks[task]["tips"] +
                         self.state.tasks[task]["qna"]
                     ) > 0:
-                        log_internal_event("[RCS] Triggered task instructions refinement.")
+                        log_internal_event(f"[RCS] Refining [{task}] with {self.state.tasks[task]["examples"]+self.state.tasks[task]["tips"]+self.state.tasks[task]["qna"]}.")
                         merge = dspy.ChainOfThought("old_task, updates -> updated_task")
                         merging = merge(old_task=task_payload.task, updates=self.build_examples(task_payload))
-                        log_internal_event(f"[RCS] Merged [{task}] with user tips and QnA: [{merging.updated_task}]")
+                        log_internal_event(f"[RCS] Refined [{task}] is now [{merging.updated_task}]")
                         task_payload.task = merging.updated_task      # override task's prompt
-                        log_internal_event("[RCS] Consuming user tips and agent questions")
+                        # log_internal_event("[RCS] Consuming user tips and agent questions")
                         self.state.tasks[task]["examples"] = [] # consume examples
                         self.state.tasks[task]["tips"] = []     # consume user tips
                         self.state.tasks[task]["qna"] = []      # consume agent questions
@@ -163,7 +165,7 @@ class RCS(dspy.Module):
                 # root tasks have self as parent (to build info coherently)
                 self.state.parent = task_payload
                 self.state.current = task_payload
-                self.state.tasks[self.state.parent.title]["trajectory"] = []  # reset trajectory
+                # self.state.tasks[self.state.parent.title]["trajectory"] = []  # reset trajectory
                 if self.state.tasks[self.state.parent.title].get("report"):
                     del self.state.tasks[self.state.parent.title]["report"]       # reset report
                 # Second, actually run the task via the recursive agents interface
@@ -216,7 +218,14 @@ class RCS(dspy.Module):
             return dspy.Prediction(report=exploration[0]["report"])
         except Exception as e:
             log_error(f"[RCS] Critical aforward error: {e}")
-            return dspy.Prediction(report="Agents crashed")
+            self.state.error = f"RCS aforward is failing, this is most likely a bug: {e}"
+            # all awake tasks to sleep
+            for title in self.state.tasks.keys():
+                if self.state.tasks[title]["state"] == "awake":
+                    log_error(f"[RCS] Forcefully putting task [{title}] to sleep due to critical error")
+                    self.state.tasks[title]["state"] = "failing"
+            raise e
+            # return dspy.Prediction(report="Agents crashed")
 
     async def agents(self, subtasks: list[Task]):
         """
@@ -227,6 +236,7 @@ class RCS(dspy.Module):
         Example call (no 'items' key under 'subtasks'):
             next_tool_args = {"tasks": [{"title": "...", "task": "...", "kind": "..."}]}
         """
+        update_action_metrics(state=self.state, action_count=len(subtasks))
         # Let LLM observe tips before proceeding
         if len(self.state.tasks[self.state.current.title]["tips"]) > 0:
             # Promote tips to examples, and consume tips
@@ -266,7 +276,6 @@ class RCS(dspy.Module):
             # # # #         "report": f"Dependencies Error: the following requested task titles do not exist: {ghost_dependencies}."
             # # # #     }]
 
-
             # After sanity checks, register current tasks as dependencies of parent task
             for task in subtasks:
                 if task.kind != "root" and self.state.parent is not None:
@@ -288,8 +297,10 @@ class RCS(dspy.Module):
                 if not self.state.tasks.get(task.title):
                     self.state.tasks[task.title] = {
                         "dependencies": [],
-                        "tips": []
+                        "tips": [],
+                        "trajectory": []
                     }
+                self.state.tasks[task.title]["trajectory"] = []     # reset trajectory
 
                 # 0. Attempt a cache hit on previously reported root task dependencies
                 if task.kind == "root" and task.title != self.state.parent.title and not self.is_task_expired(task.title):
@@ -394,6 +405,7 @@ class RCS(dspy.Module):
 
         except Exception as e:
             log_error(f"[AGENTS] Critical error: {e}")
+            self.state.error = f"Agents are failing, this is most likely a bug: {e}"
             raise e
 
         # Return reports in LLM-friendly format
@@ -415,40 +427,47 @@ class RCS(dspy.Module):
         Return:
             a report on the task
         """
-        try:
-            log_payload = {"info": info, "task": task}
-            log_internal_event(f"[RECURSE] {json.dumps(log_payload, indent=4, default=str)}")
+        prediction = dspy.Prediction(answer="Agent was unable to complete the task.")
+        with dspy.utils.usage_tracker.track_usage() as usage_tracker:
+            try:
+                log_payload = {"info": info, "task": task}
+                log_internal_event(f"[RECURSE] {json.dumps(log_payload, indent=4, default=str)}")
 
-            self.state.current = task
-            # Stream tokens to specified asyncio queue
-            return await stream_dspy_program(
-                queues=[self.state.tokens],
-                module=module,
-                # task=task,
-                # task={"title": task.title, "task": task.task, "dependencies": task.dependencies},
-                task={"title": task.title, "task": task.task},
-                info=info,
-            )
-
-            # TODO: implement self-review here, with self.user tool access to curate examples
-        except (dspy.LMError, dspy.AdapterParseError) as e:
-            log_error(f"DSPy LM Error: {e}")
-            # Retry a bunch of times (LLM backend might be flaky)
-            if retries > 0:
-                await asyncio.sleep(3)
-
-                # Retry failing agents
-                return await self.recurse(
+                self.state.current = task
+                # Stream tokens to specified asyncio queue
+                prediction = await stream_dspy_program(
+                    queues=[self.state.tokens],
                     module=module,
-                    task=task,
-                    # info=self.build_info(task.kind), # rebuild info after qna update
-                    # info=self.build_tips(task.kind) + self.build_working_memory(task.kind), # rebuild info after qna update
-                    info=self.build_working_memory(task), # rebuild working memory
-                    retries=retries-1,
+                    # task=task,
+                    # task={"title": task.title, "task": task.task, "dependencies": task.dependencies},
+                    task={"title": task.title, "task": task.task},
+                    info=info,
                 )
-            else:
-                raise e         # raise it to self.agents
+                # return prediction
 
+                # TODO: implement self-review here, with self.user tool access to curate examples
+            except (dspy.LMError, dspy.AdapterParseError) as e:
+                log_error(f"DSPy LM Error: {e}")
+                # Retry a bunch of times (LLM backend might be flaky)
+                if retries > 0:
+                    await asyncio.sleep(3)
+                    # Retry failing agents
+                    prediction = await self.recurse(
+                        module=module,
+                        task=task,
+                        # info=self.build_info(task.kind), # rebuild info after qna update
+                        # info=self.build_tips(task.kind) + self.build_working_memory(task.kind), # rebuild info after qna update
+                        info=self.build_working_memory(task), # rebuild working memory
+                        retries=retries-1,
+                    )
+                # else:
+                #     raise e         # raise it to self.agents
+            # finally:
+            #     log_internal_event(f"[RCS] Updating token count and returning answer for [{task.title}].")
+            #     for model, usage in usage_tracker.get_total_tokens().items():
+            #         self.state.metrics.prompt_tokens += usage.get("prompt_tokens", 0)
+            #         self.state.metrics.completion_tokens += usage.get("completion_tokens", 0)
+        return prediction
 
     async def user(self, questions: list[str]):
         """
@@ -480,6 +499,7 @@ class RCS(dspy.Module):
                 answers += [{"question": question, "answer": answer}]
         except Exception as e:
             log_error(f"User error: {e}")
+            self.state.error = f"User escalation is failing, this is most likely a bug: {e}"
             raise e
         return answers
 

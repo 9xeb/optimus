@@ -112,7 +112,8 @@ async def tasks_page():
     return {
         "tasks": optimus.state.tasks,
         "situation": optimus.state.situation,
-        "error": optimus.state.error
+        "error": optimus.state.error,
+        "metrics": optimus.state.metrics
     }
 
 @app.post("/review")
