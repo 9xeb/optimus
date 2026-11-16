@@ -2593,7 +2593,7 @@ function renderComposerDetails(s) {
   }
   if (s.type === 'tool-approval') {
     box.append(el('div', { class: 'proposal-card justify-card' }, [
-      el('div', { class: 'justify-label', text: 'WHY THIS CALL' }),
+      el('div', { class: 'justify-label', text: 'REQUESTING APPROVAL' }),
       el('div', { class: 'justify-text', text: s.justification }),
     ]));
     box.append(el('details', { class: 'tool-details' }, [
