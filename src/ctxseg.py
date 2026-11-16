@@ -3,10 +3,11 @@ import datetime
 from enum import Enum
 import json
 from pathlib import Path
+import time
 
 import numpy
 import dspy
-# from dspy.utils.usage_tracker import track_usage  
+# from dspy.utils.usage_tracker import track_usage
 
 from src.log import log_internal_event, log_error
 from src.utils import stream_dspy_program, State, Task, update_action_metrics
@@ -135,20 +136,20 @@ class RCS(dspy.Module):
                     # Refine the task's prompt if tier is zero (examples changed)
                     # Basically a hybrid optimization with human in the loop
                     # if self.state.tasks[task]["tier"] == 0:
-                    if len(
-                        self.state.tasks[task]["examples"] +
-                        self.state.tasks[task]["tips"] +
-                        self.state.tasks[task]["qna"]
-                    ) > 0:
-                        log_internal_event(f"[RCS] Refining [{task}] with {self.state.tasks[task]["examples"]+self.state.tasks[task]["tips"]+self.state.tasks[task]["qna"]}.")
-                        merge = dspy.ChainOfThought("old_task, updates -> updated_task")
-                        merging = merge(old_task=task_payload.task, updates=self.build_examples(task_payload))
-                        log_internal_event(f"[RCS] Refined [{task}] is now [{merging.updated_task}]")
-                        task_payload.task = merging.updated_task      # override task's prompt
-                        # log_internal_event("[RCS] Consuming user tips and agent questions")
-                        self.state.tasks[task]["examples"] = [] # consume examples
-                        self.state.tasks[task]["tips"] = []     # consume user tips
-                        self.state.tasks[task]["qna"] = []      # consume agent questions
+                    # # # # if len(
+                    # # # #     self.state.tasks[task]["examples"] +
+                    # # # #     self.state.tasks[task]["tips"] +
+                    # # # #     self.state.tasks[task]["qna"]
+                    # # # # ) > 0:
+                    # # # #     log_internal_event(f"[RCS] Refining [{task}] with {self.state.tasks[task]["examples"]+self.state.tasks[task]["tips"]+self.state.tasks[task]["qna"]}.")
+                    # # # #     merge = dspy.ChainOfThought("old_task, updates -> updated_task")
+                    # # # #     merging = merge(old_task=task_payload.task, updates=self.build_examples(task_payload))
+                    # # # #     log_internal_event(f"[RCS] Refined [{task}] is now [{merging.updated_task}]")
+                    # # # #     task_payload.task = merging.updated_task      # override task's prompt
+                    # # # #     # log_internal_event("[RCS] Consuming user tips and agent questions")
+                    # # # #     self.state.tasks[task]["examples"] = [] # consume examples
+                    # # # #     self.state.tasks[task]["tips"] = []     # consume user tips
+                    # # # #     self.state.tasks[task]["qna"] = []      # consume agent questions
                 else:
                     # Case 2: create a new root task for unseen problem
                     # log_error(f"[RCS] Growing new root task: [{task}]")
@@ -165,6 +166,7 @@ class RCS(dspy.Module):
                 # root tasks have self as parent (to build info coherently)
                 self.state.parent = task_payload
                 self.state.current = task_payload
+                # self.state.metrics.last_action_time = time.time()
                 # self.state.tasks[self.state.parent.title]["trajectory"] = []  # reset trajectory
                 if self.state.tasks[self.state.parent.title].get("report"):
                     del self.state.tasks[self.state.parent.title]["report"]       # reset report
@@ -229,22 +231,22 @@ class RCS(dspy.Module):
 
     async def agents(self, subtasks: list[Task]):
         """
-        Break down into subtasks, given the available information.
+        Break down into single-action subtasks, given the available information.
         When previous subtasks yield new information, capitalize on it and proceed with new subtasks.
         If some subtasks fail, think outside the box and break down new subtasks.
 
         Example call (no 'items' key under 'subtasks'):
-            next_tool_args = {"tasks": [{"title": "...", "task": "...", "kind": "..."}]}
+            next_tool_args = {"subtasks": [{"title": "...", "task": "...", "kind": "..."}]}
         """
         update_action_metrics(state=self.state, action_count=len(subtasks))
-        # Let LLM observe tips before proceeding
-        if len(self.state.tasks[self.state.current.title]["tips"]) > 0:
-            # Promote tips to examples, and consume tips
-            self.state.tasks[self.state.current.title]["examples"] += self.state.tasks[self.state.current.title]["tips"]
-            output = f"Before you proceed, the user provided these additional tips: {self.state.tasks[self.state.current.title["tips"]]}"
-            self.state.tasks[self.state.current.title]["tips"] = []
-            log_internal_event(f"[RCS] Some tips were found going down. {output}")
-            return output
+        # # # # # Let LLM observe tips before proceeding
+        # # # # if len(self.state.tasks[self.state.current.title]["tips"]) > 0:
+        # # # #     # Promote tips to examples, and consume tips
+        # # # #     self.state.tasks[self.state.current.title]["examples"] += self.state.tasks[self.state.current.title]["tips"]
+        # # # #     output = f"Before you proceed, the user provided these additional tips: {self.state.tasks[self.state.current.title["tips"]]}"
+        # # # #     self.state.tasks[self.state.current.title]["tips"] = []
+        # # # #     log_internal_event(f"[RCS] Some tips were found going down. {output}")
+        # # # #     return output
 
         log_internal_event(f"[AGENTS] Spawned with tasks: {subtasks}")
         try:
@@ -423,11 +425,12 @@ class RCS(dspy.Module):
         return [
             {"title": task.title} | self.state.tasks[task.title]
             for task in subtasks
-        ] + [
-            # Add tips coming from user after task started
-            # {"tips_from_user": self.state.tasks[self.state.parent.title]["examples"]}
-            {"tips_from_user": tips_from_user}
         ]
+        # # # # ] + [
+        # # # #     # Add tips coming from user after task started
+        # # # #     # {"tips_from_user": self.state.tasks[self.state.parent.title]["examples"]}
+        # # # #     {"tips_from_user": tips_from_user}
+        # # # # ]
 
     async def recurse(self, module: dspy.Module, task: Task, info: list, retries: int = 3):
         """
@@ -482,6 +485,7 @@ class RCS(dspy.Module):
         """
         Escalate to the user, when out of strategies.
         """
+        update_action_metrics(state=self.state, action_count=1)
         # Escalate to the user for guidance when unable to fully complete the task.
         try:
             answers = []
@@ -497,14 +501,14 @@ class RCS(dspy.Module):
                 # Update examples dataset
                 # self.state.qna[question] = {"kind": self.state.current.kind, "content": "User: "+answer}
                 # self.state.qna[question] = {"title": self.state.current.title, "content": "User: "+answer}
-                self.state.tasks[self.state.parent.title]["qna"] += [{
+                self.state.tasks[self.state.parent.title]["examples"] += [{
                     "question": question,
                     "answer": "User: "+answer
                 }]
                 # Signal that task needs refinement
                 self.state.tasks[self.state.parent.title]["tier"] = 0
                 # log_internal_event(f"[RCS] {self.state.qna}")
-                log_internal_event(f"[RCS] Updated QnA for [{self.state.current.title}]: {self.state.tasks[self.state.parent.title]["qna"]}")
+                log_internal_event(f"[RCS] Updated QnA for [{self.state.current.title}]: {self.state.tasks[self.state.parent.title]["examples"]}")
                 answers += [{"question": question, "answer": answer}]
         except Exception as e:
             log_error(f"User error: {e}")
@@ -529,27 +533,6 @@ class RCS(dspy.Module):
             }
             # | self.info
         ]
-        return info
-
-    def build_examples(self, task: Task):
-        """Rebuild info for refining task's prompt"""
-        log_internal_event(f"[RCS] Rebuilding training examples for [{task}]")
-        info = [
-            {
-                # "tips": [
-                #     {"question": question, "answer": answer["content"]}
-                #     for question,answer in self.state.qna.items()
-                #     # if answer["kind"] == kind
-                #     if answer["title"] == task.kind
-                "examples": (
-                    self.state.tasks[task.title]["qna"] +
-                    self.state.tasks[task.title]["examples"] +
-                    self.state.tasks[task.title]["tips"]
-                )
-            }
-        ]
-        # log_internal_event(f"[RCS] {self.state.tasks[task.title]}")
-        # log_internal_event(f"[RCS] Training examples for [{task}]: {info}")
         return info
 
     def is_task_expired(self, title: str):

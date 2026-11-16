@@ -24,7 +24,7 @@ parser.add_argument('-a', '--approval', action='store_true', help='Enable tool a
 args = parser.parse_args()
 
 app = FastAPI()
-app.frontend("/", directory="dist")
+app.frontend("/", directory="src/dist")
 
 optimus = Optimus(filepath=args.file, approval=args.approval)
 
@@ -52,15 +52,20 @@ async def run_task(name: str):
     """Update a task and run it"""
     if optimus.state.job is not None and not optimus.state.job.done():
         # For now, only one concurrent root task is allowed
-        raise HTTPException(status_code=409, detail="Optimus is busy with another root task.")
+        raise HTTPException(status_code=409, detail=f"Busy with task: [{optimus.state.parent.title}]")
+    elif any([task["state"] == "consolidating" for title,task in optimus.state.tasks.items()]):
+    # optimus.state.tasks.get(name) and optimus.state.tasks[name]["state"] == "sleeping":
+        raise HTTPException(status_code=409, detail="Busy consolidating tasks.")
     else:
         # log_internal_event(f"Triggering Optimus")
-        optimus.state.job = asyncio.create_task(optimus.grow(name))
+        optimus.state.job = asyncio.create_task(optimus.reap(name))
 
 @app.put("/tasks")
 async def update_task(task: TaskPayload):
     """Override dependencies and tip for a task"""
-    result = optimus.graft(task=task.task, deps=task.dependencies, tip=task.tip)
+    result = optimus.graft(task=task.task, deps=task.dependencies)
+    if task.tip:
+        optimus.grow(task=task.task, examples=[task.tip])
     if result is not None:
         raise HTTPException(status_code=404, detail=result)
 
@@ -71,9 +76,9 @@ async def delete_task(name: str):
     if result is not None:
         raise HTTPException(status_code=404, detail=result)
 
-@app.get("/tasks/stream", response_class=EventSourceResponse)
-async def stream_tasks():
-    """Resume streaming of tasks in current job"""
+@app.get("/tasks/stream/actions", response_class=EventSourceResponse)
+async def stream_actions():
+    """Resume streaming of actions in current job"""
     if optimus.state.job is None or optimus.state.job.done():
         raise HTTPException(status_code=404, detail="Optimus is idle.")
     else:
@@ -81,6 +86,21 @@ async def stream_tasks():
         while True:
             # chunk = await optimus.state.tokens.get()
             chunk = await optimus.state.actions.get()
+            if chunk:
+                # yield ServerSentEvent(data=chunk["data"].chunk, event=chunk["task"])
+                yield ServerSentEvent(data=chunk["data"], event=chunk["task"])
+            else:
+                break
+
+@app.get("/tasks/stream/tokens", response_class=EventSourceResponse)
+async def stream_tokens():
+    """Resume streaming of tokens in current job"""
+    if optimus.state.job is None or optimus.state.job.done():
+        raise HTTPException(status_code=404, detail="Optimus is idle.")
+    else:
+        # Pick up queue and start streaming all there is
+        while True:
+            chunk = await optimus.state.tokens.get()
             if chunk:
                 # yield ServerSentEvent(data=chunk["data"].chunk, event=chunk["task"])
                 yield ServerSentEvent(data=chunk["data"], event=chunk["task"])
@@ -126,12 +146,20 @@ async def review_situation(review: dict):
         optimus.state.resolution = review.get("review")
         optimus.state.event.set()
     else:
-        # If there are no pending situation, review is injected in the current running agent
+        # If there are no pending situation, review trigger an instruction update and a task restart
         # This is called steering
-        log_internal_event(f"[BACKEND] There are no pending situations, steering agents with: [{review.get('review')}].")
-        optimus.state.tasks[optimus.state.current.title]["tips"] += [
-            review.get("review")
-        ]
+        log_internal_event(f"[BACKEND] No pending situations, steering agents with: [{review.get('review')}].")
+        root_task = optimus.state.parent.title
+        # 1. Stop current job
+        await cancel_tasks()
+        # await optimus.stop()
+        # 2. Refine root task
+        optimus.grow(task=optimus.state.parent.title, examples=[review.get("review")])
+        # 3. Re-run task
+        return run_task(name=root_task)
+        # optimus.state.tasks[optimus.state.parent.title]["tips"] += [
+        #     review.get("review")
+        # ]
 
 # @app.get("/", response_class=HTMLResponse)
 # async def home_page():

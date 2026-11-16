@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#070b12"/>
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg"/>
 <title>Optimus Console</title>
-<link rel="stylesheet" href="assets/css/console.css">
+<link rel="stylesheet" href="assets/css/console.css?v=3">
 </head>
 <body>
 <div id="app">
@@ -37,6 +37,7 @@
         <span class="metric-label" aria-hidden="true">apm</span>
       </span>
     </span>
+    <span id="token-tape" class="token-tape" aria-hidden="true"><span id="token-tape-text"></span></span>
     <div class="topbar-actions">
       <button id="stop-all" class="btn tiny ghost danger" type="button" aria-haspopup="dialog" aria-expanded="false" aria-disabled="true" aria-label="Stop all tasks: Nothing is running" title="Nothing is running">
         <span class="stop-label-full">Stop all</span>
@@ -118,18 +119,13 @@
       </div>
     </div>
 
-    <aside id="inspector" aria-label="Task report" aria-hidden="true" inert>
+    <aside id="inspector" aria-label="Task detail" aria-hidden="true" inert>
       <div id="inspector-inner">
         <header id="inspector-head">
           <h2 id="inspector-title" tabindex="-1"></h2>
-          <button id="inspector-close" type="button" aria-label="Close report">✕</button>
+          <button id="inspector-close" type="button" aria-label="Close detail">✕</button>
         </header>
-        <div id="inspector-tabs" role="tablist" aria-label="Task views">
-          <button id="inspector-tab-run" class="inspector-tab" type="button" role="tab" aria-selected="true" aria-controls="inspector-run-panel" tabindex="0">Run</button>
-          <button id="inspector-tab-report" class="inspector-tab" type="button" role="tab" aria-selected="false" aria-controls="inspector-report-panel" tabindex="-1">Report</button>
-        </div>
-        <div id="inspector-run-panel" class="inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-run"></div>
-        <div id="inspector-report-panel" class="inspector-panel hidden" role="tabpanel" aria-labelledby="inspector-tab-report"></div>
+        <div id="inspector-run-panel" class="inspector-panel" aria-label="Task detail"></div>
         <div id="inspector-steer" class="hidden" role="group" aria-labelledby="inspector-steer-label">
           <label id="inspector-steer-label" class="inspector-label" for="inspector-steer-input">Steer the running task</label>
           <textarea id="inspector-steer-input" rows="2" spellcheck="true" placeholder="Tell the running task something it should know…"></textarea>
@@ -177,6 +173,6 @@
 <script src="vendor/dagre.min.js"></script>
 <script src="vendor/marked.min.js"></script>
 <script src="vendor/purify.min.js"></script>
-<script type="module" src="assets/js/console.js"></script>
+<script type="module" src="assets/js/console.js?v=3"></script>
 </body>
 </html>

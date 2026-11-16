@@ -75,7 +75,7 @@ class Optimus():
 
         self.approval = approval
 
-    async def grow(self, task: str):
+    async def reap(self, task: str):
         """
         Grow the memories while solving the tasks in the meantime
         This is the section that retrieves and wraps MCP tools around approval gates
@@ -144,15 +144,15 @@ class Optimus():
                         """
                         update_action_metrics(state=self.state, action_count=len(calls))
 
-                        # Before any next tool call, let LLM observe mid-task tips once
-                        if len(self.state.tasks[self.state.current.title]["tips"]) > 0:
-                            # Propagate tips upwards
-                            self.state.tasks[self.state.parent.title]["tips"] += self.state.tasks[self.state.current.title]["tips"]
-                            output = f"Before you proceed, the user provided the following tips: {self.state.tasks[self.state.parent.title]["tips"]}."
-                            log_internal_event(f"[OPTIMUS] Some tips were found. {output}")
-                            # Consume local tips
-                            self.state.tasks[self.state.current.title]["tips"] = []
-                            return output
+                        # # # # # Before any next tool call, let LLM observe mid-task tips once
+                        # # # # if len(self.state.tasks[self.state.current.title]["tips"]) > 0:
+                        # # # #     # Propagate tips upwards
+                        # # # #     self.state.tasks[self.state.parent.title]["tips"] += self.state.tasks[self.state.current.title]["tips"]
+                        # # # #     output = f"Before you proceed, the user provided the following tips: {self.state.tasks[self.state.parent.title]["tips"]}."
+                        # # # #     log_internal_event(f"[OPTIMUS] Some tips were found. {output}")
+                        # # # #     # Consume local tips
+                        # # # #     self.state.tasks[self.state.current.title]["tips"] = []
+                        # # # #     return output
 
                         # Split as many tool calls as possible in multiple items in the call list.
                         # Split repetitive or looping operations into multiple items in the calls list.
@@ -242,6 +242,8 @@ class Optimus():
                     ]
                     log_internal_event(f"[OPTIMUS] Dynamic tools: {dynamic_tools}")
 
+                    # Refine the task with all known examples
+                    self.grow(task=task, examples=self.build_examples(task=task))
                     # This is the entrypoint of the repeated context segmentation
                     agent = RCS(
                         state=self.state,
@@ -256,7 +258,7 @@ class Optimus():
                 for e in eg.exceptions:
                     # logger.exception("real error", exc_info=e)
                     self.state.error = "Probable MCP connection problem."
-                    log_error(f"Optimus critical error: {e}")
+                    log_error(f"Optimus critical error: {e} ({self.state.error})")
             else:
                 log_error(f"Optimus critical error: {eg}")
             # signal failing tasks
@@ -265,10 +267,29 @@ class Optimus():
                     task["state"] = "failing"
             raise e
 
+    def grow(self, task: str, examples: list):
+        """Refine the given task's instruction using the available examples"""
+        if task not in list(self.state.tasks.keys()):
+            log_internal_event(f"[OPTIMUS] Unable to refine non-existing task [{task}]")
+            return f"Task [{task}] does not exist."
+
+        if len(examples) > 0:
+            self.state.tasks[task]["state"] = "consolidating"
+            log_internal_event(f"[OPTIMUS] Refining [{task}] with {examples}.")
+            merge = dspy.ChainOfThought("old_task, updates -> updated_task")
+            merging = merge(old_task=task, updates=examples)
+            log_internal_event(f"[OPTIMUS] Refined [{task}] is now [{merging.updated_task}]")
+
+            self.state.tasks[task]["task"] = merging.updated_task      # override task's prompt
+            self.state.tasks[task]["state"] = "sleeping"
+            self.state.tasks[task]["examples"] += examples
+        # self.state.tasks[task]["examples"] = [] # consume examples
+
+
     def prune(self, task: str):
         """Remove a root task"""
         if task not in list(self.state.tasks.keys()):
-            log_internal_event(f"[OPTIMUS] Tried to delete non-existing task [{task}]")
+            log_internal_event(f"[OPTIMUS] Unable to delete non-existing task [{task}]")
             return f"Task [{task}] does not exist."
         else:
             # Remove all references to task as a dependency
@@ -279,7 +300,7 @@ class Optimus():
             log_internal_event(f"[OPTIMUS] Removed all references to [{task}]")
             return
 
-    def graft(self, task: str, deps: list[str], tip: str = None):
+    def graft(self, task: str, deps: list[str]):
         """Reconnect task with new dependencies"""
         if task not in list(self.state.tasks.keys()):
             return f"Task [{task}] does not exist."
@@ -289,10 +310,10 @@ class Optimus():
             log_internal_event(f"[OPTIMUS] Grafting [{task}] with new dependencies: {deps}")
             self.state.tasks[task]["dependencies"] = deps
 
-            # Add tip (will be consumed at the next run of the task)
-            if tip is not None:
-                self.state.tasks[task]["examples"] += [tip]
-                self.state.tasks[task]["tier"] = 0
+            # # # Add tip (will be consumed at the next run of the task)
+            # # if tip is not None:
+            # #     self.state.tasks[task]["examples"] += [tip]
+            # #     self.state.tasks[task]["tier"] = 0
             return
 
     def plant(self, task: str, deps: list[str]):
@@ -324,7 +345,26 @@ class Optimus():
             self.state.job = None
             self.state.situation = {}
             self.state.tokens = asyncio.Queue()
+            self.state.parent = None
+            self.state.current = None
             for title,task in self.state.tasks.items():
                 if task.get("state") == "awake":
                     task["state"] = "sleeping"
             log_internal_event("[OPTIMUS] Job cancelled.")
+
+    def build_examples(self, task: str):
+        """Rebuild info for refining task's prompt"""
+        log_internal_event(f"Rebuilding training examples for [{task}]")
+        info = [
+            self.state.tasks[task]["qna"] +
+            self.state.tasks[task]["examples"] +
+            self.state.tasks[task]["tips"]
+            # {
+            #     "examples": (
+            #         self.state.tasks[task]["qna"] +
+            #         self.state.tasks[task]["examples"] +
+            #         self.state.tasks[task]["tips"]
+            #     )
+            # }
+        ]
+        return info

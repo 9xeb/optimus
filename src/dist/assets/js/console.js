@@ -2,8 +2,10 @@
 const TASKS_URL = '/tasks', REVIEW_URL = '/review', POLL_INTERVAL = 2000, DEFAULT_TTL = 60;
 const CANCEL_URL = '/tasks/cancel';
 const SANDBOX_URL = `http://${location.hostname || '127.0.0.1'}:8080/`;
-const STREAM_URL = '/tasks/stream';
+const ACTIONS_STREAM_URL = '/tasks/stream/actions';
+const TOKENS_STREAM_URL = '/tasks/stream/tokens';
 const PING_TIMEOUT_MS = 45000;
+const TOKEN_BUFFER_MAX = 1200, TOKEN_BUFFER_TRIM = 700, TOKEN_SPILL_MAX = 8000, TOKEN_PAINT_MS = 100;
 const LABEL_MAX_CHARS = 22, LABEL_CHAR_W = 6.6, LABEL_LINE_H = 13, LABEL_GAP = 16;
 const EVENT_LABELS = { 'task-proposal': 'TASK', 'tool-approval': 'ACTION', 'question': 'QUESTION', 'review': 'REVIEW' };
 const EVENT_CLASSES = { 'task-proposal': 'event-task', 'tool-approval': 'event-action', 'question': 'event-question', 'review': 'event-review' };
@@ -27,8 +29,13 @@ const state = {
   actionLockTimer: null,
   layout: null,
   signature: null,
+  paintedOnce: false,
+  envelopeSeen: false,
+  bloomRoot: null,
+  cast: null,
   viewport: d3.zoomIdentity,
   fitPending: true,
+  centerOnSelect: null,
   layoutChanged: false,
   run: { id: null, pending: false },
   runPrompt: { open: false, taskId: null, tip: '', tipSaved: false, pending: false, error: null },
@@ -53,19 +60,23 @@ const state = {
     action: null,
     activitySig: null,
   },
-  reportsSeeded: false,
-  seenAt: new Map(),
-  unread: new Map(),
+  tokens: {
+    status: 'idle',
+    buffer: '',
+    paintTimer: null,
+    pos: 0,
+    target: 0,
+    targetAt: 0,
+    speed: 0,
+    glideRaf: 0,
+  },
   find: { open: false, query: '', matches: [], index: 0, returnRoot: null, returnExpanded: null, returnSelected: null },
   inspectorSig: null,
   inspectorTaskId: null,
   inspectorTrajectorySig: null,
   inspectorTrajectoryCount: 0,
   inspectorInstruction: null,
-  inspectorTab: 'run',
   inspectorResetRunTop: false,
-  inspectorResetReportTop: false,
-  inspectorLastPaintedTab: null,
   trajectoryFollow: true,
   scrollGuardUntil: 0,
   error: null,
@@ -74,6 +85,7 @@ const state = {
 };
 
 const reduceMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const mouthAngles = new Map();
 
 function el(t, p = {}, c = []) {
   const n = document.createElement(t);
@@ -91,7 +103,12 @@ function el(t, p = {}, c = []) {
 }
 
 function normKind(k) { return k === 'root' ? 'root' : (k === 'complex' ? 'complex' : 'simple'); }
-function normState(s) { return s === 'awake' ? 'awake' : (s === 'failing' ? 'failing' : 'sleeping'); }
+function normState(s, kind) {
+  if (s === 'consolidating') return kind === 'root' ? 'consolidating' : 'sleeping';
+  if (s === 'awake') return 'awake';
+  if (s === 'failing') return 'failing';
+  return 'sleeping';
+}
 function normMetric(v) { return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0; }
 function normMetrics(raw) {
   const m = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
@@ -106,7 +123,115 @@ function normEngineError(raw) {
   return text || null;
 }
 function nodeRadius(t) { return t && (t.kind === 'root' || t.kind === 'complex') ? 26 : 18; }
+function ballRadius(r) { return Math.max(6, Math.round(r * 0.42)); }
+function labelOffsetFor(r, kind, ghost) { return (ghost || kind === 'root') ? r + LABEL_GAP : ballRadius(r) + LABEL_GAP; }
 function ghostId(title) { return '__sit__:' + title; }
+
+function linkCurve(sx, sy, sr, ex, ey, er) {
+  const dx = ex - sx, dy = ey - sy;
+  const dist = Math.hypot(dx, dy) || 1;
+  const ux = dx / dist, uy = dy / dist;
+  const ax = sx + ux * sr, ay = sy + uy * sr;
+  const bx = ex - ux * er, by = ey - uy * er;
+  const mx = (ax + bx) / 2, my = (ay + by) / 2;
+  const nx = -uy, ny = ux;
+  const bend = Math.min(96, Math.max(26, dist * 0.16));
+  return `M${ax},${ay} Q${mx + nx * bend},${my + ny * bend} ${bx},${by}`;
+}
+/* Arc starts after the southeast mouth and sweeps clockwise, leaving the gap the arrow exits from. */
+function rayRectExit(cx, cy, dx, dy, left, top, right, bottom) {
+  let tmin = -Infinity, tmax = Infinity;
+  const slab = (c, d, lo, hi) => {
+    if (Math.abs(d) < 1e-9) return c >= lo && c <= hi;
+    let t1 = (lo - c) / d, t2 = (hi - c) / d;
+    if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+    tmin = Math.max(tmin, t1);
+    tmax = Math.min(tmax, t2);
+    return true;
+  };
+  if (!slab(cx, dx, left, right)) return null;
+  if (!slab(cy, dy, top, bottom)) return null;
+  if (tmax < 0 || tmin > tmax) return null;
+  return tmax;
+}
+/* Where an edge should stop so it clears the node's orbit/ball and its title. */
+function arrowBoundary(p, q, base = p.r) {
+  const dx = q.x - p.x, dy = q.y - p.y;
+  const d = Math.hypot(dx, dy) || 1;
+  let stop = base;
+  const lm = p.label;
+  if (lm && lm.width > 0) {
+    const off = p.labelOffset != null ? p.labelOffset : p.r + LABEL_GAP;
+    const pad = 5;
+    const hit = rayRectExit(
+      p.x, p.y, dx / d, dy / d,
+      p.x - lm.width / 2 - pad,
+      p.y + off - LABEL_LINE_H - pad,
+      p.x + lm.width / 2 + pad,
+      p.y + off + lm.height + pad,
+    );
+    if (hit != null) stop = Math.max(stop, hit);
+  }
+  return stop + 2;
+}
+function routeEdge(L, e) {
+  const s = L.nodes.get(e.source), t = L.nodes.get(e.target);
+  if (!s || !t) return '';
+  const st = state.tasks.get(e.source), tt = state.tasks.get(e.target);
+  const sourceBase = st && st.kind === 'root' ? s.r : (st ? ballRadius(s.r) : s.r);
+  const sr = arrowBoundary(s, t, sourceBase);
+  const er = arrowBoundary(t, s, t.r);
+  const dx = t.x - s.x, dy = t.y - s.y;
+  const dist = Math.hypot(dx, dy) || 1;
+  const ux = dx / dist, uy = dy / dist;
+  const ax = s.x + ux * sr, ay = s.y + uy * sr;
+  const bx = t.x - ux * er, by = t.y - uy * er;
+  const mx = (ax + bx) / 2, my = (ay + by) / 2;
+  const nx = -uy, ny = ux;
+  const bend = Math.min(96, Math.max(26, dist * 0.16));
+  const others = [];
+  for (const [id, p] of L.nodes) {
+    if (id === e.source || id === e.target) continue;
+    others.push(p);
+  }
+  const collides = (x, y) => {
+    for (const p of others) {
+      const rr = p.r + 6;
+      if ((x - p.x) ** 2 + (y - p.y) ** 2 <= rr * rr) return true;
+      const lm = p.label;
+      if (!lm || !lm.width) continue;
+      const off = p.labelOffset != null ? p.labelOffset : p.r + LABEL_GAP;
+      const pad = 5;
+      if (x >= p.x - lm.width / 2 - pad && x <= p.x + lm.width / 2 + pad &&
+          y >= p.y + off - LABEL_LINE_H - pad && y <= p.y + off + lm.height + pad) return true;
+    }
+    return false;
+  };
+  let best = '', bestRank = Infinity;
+  for (const scale of [1, -1, 1.5, -1.5, 2, -2, 3, -3, 0]) {
+    const cx = mx + nx * bend * scale;
+    const cy = my + ny * bend * scale;
+    let hits = 0;
+    for (let i = 1; i < 20; i++) {
+      const u = i / 20, v = 1 - u;
+      const x = v * v * ax + 2 * v * u * cx + u * u * bx;
+      const y = v * v * ay + 2 * v * u * cy + u * u * by;
+      if (collides(x, y)) { hits++; }
+    }
+    const d = `M${ax.toFixed(1)},${ay.toFixed(1)} Q${cx.toFixed(1)},${cy.toFixed(1)} ${bx.toFixed(1)},${by.toFixed(1)}`;
+    if (hits === 0) { best = d; break; }
+    const rank = hits * 100 + Math.abs(scale);
+    if (rank < bestRank) { bestRank = rank; best = d; }
+  }
+  return best || `M${ax},${ay} L${bx},${by}`;
+}
+function orbitArcPath(r, gapDeg = 44) {
+  const a0 = (45 + gapDeg / 2) * Math.PI / 180;
+  const a1 = (45 - gapDeg / 2 + 360) * Math.PI / 180;
+  const x0 = Math.cos(a0) * r, y0 = Math.sin(a0) * r;
+  const x1 = Math.cos(a1) * r, y1 = Math.sin(a1) * r;
+  return `M${x0.toFixed(2)},${y0.toFixed(2)} A${r},${r} 0 1 1 ${x1.toFixed(2)},${y1.toFixed(2)}`;
+}
 
 function wrapTitle(title, maxChars = LABEL_MAX_CHARS) {
   const words = String(title || '').split(/\s+/).filter(Boolean);
@@ -178,13 +303,14 @@ function applyTasks(raw) {
   for (const t of arr) {
     const id = t.title || t.id || t.name;
     if (!id) continue;
+    const kind = normKind(t.kind);
     map.set(id, {
       id,
       title: id,
       instruction: t.task || t.instruction || '',
       deps: Array.isArray(t.dependencies) ? t.dependencies.map(String) : [],
-      kind: normKind(t.kind),
-      state: normState(t.state),
+      kind,
+      state: normState(t.state, kind),
       ttl: Number(t.ttl) > 0 ? Number(t.ttl) : DEFAULT_TTL,
       report: t.report || '',
       reportAt: t.timestamp || t.reportAt || null,
@@ -312,34 +438,6 @@ function awakeCount() {
   for (const t of state.tasks.values()) if (t.state === 'awake') n++;
   return n;
 }
-function markSeen(id) {
-  const t = state.tasks.get(id);
-  if (!t || !t.report) return;
-  state.seenAt.set(id, t.reportAt || '');
-  state.unread.delete(id);
-}
-function observeReports(prevTasks, nextTasks) {
-  const first = !state.reportsSeeded;
-  for (const [id, t] of nextTasks) {
-    if (!t.report) {
-      state.seenAt.delete(id);
-      state.unread.delete(id);
-      continue;
-    }
-    const at = t.reportAt || '';
-    if (first) { state.seenAt.set(id, at); continue; }
-    const prev = prevTasks.get(id);
-    const prevAt = prev ? (prev.reportAt || '') : null;
-    if (prevAt !== at && (!state.seenAt.has(id) || state.seenAt.get(id) !== at)) {
-      state.unread.set(id, at);
-    }
-  }
-  for (const id of [...state.seenAt.keys()]) if (!nextTasks.has(id)) state.seenAt.delete(id);
-  for (const id of [...state.unread.keys()]) {
-    if (!nextTasks.has(id) || !nextTasks.get(id).report) state.unread.delete(id);
-  }
-  state.reportsSeeded = true;
-}
 function activeGhosts() {
   const s = state.situation;
   if (!s || s.type !== 'task-proposal' || s.unsupported || state.situationStatus === 'settled') return [];
@@ -364,12 +462,16 @@ function applyEnvelope(env) {
   const prevTasks = state.tasks;
   const prevSelected = state.selected ? prevTasks.get(state.selected) : null;
   const hadSelectedFocus = !!state.selected && (
-    actionRing.node().contains(document.activeElement) ||
     document.getElementById('inspector').contains(document.activeElement) ||
     document.getElementById('delete-popover').contains(document.activeElement) ||
     document.getElementById('run-popover').contains(document.activeElement)
   );
   state.tasks = applyTasks(env.tasks);
+  const addedRoots = state.envelopeSeen
+    ? [...state.tasks.values()].filter(t => t.kind === 'root' && !prevTasks.has(t.id))
+    : [];
+  state.envelopeSeen = true;
+  if (addedRoots.length) state.bloomRoot = addedRoots[addedRoots.length - 1].id;
   state.engineError = normEngineError(env.error);
   state.metrics = normMetrics(env.metrics);
   const lostSelected = !!state.selected && !state.tasks.has(state.selected);
@@ -398,8 +500,6 @@ function applyEnvelope(env) {
     if (state.gesture.mode !== 'idle') cancelGesture();
     if (state.deleteConfirm.open) { state.deleteConfirm = { open: false, pending: false, error: null }; }
   }
-  observeReports(prevTasks, state.tasks);
-
   if (state.activeRoot && (!state.tasks.has(state.activeRoot) || state.tasks.get(state.activeRoot).kind !== 'root')) {
     state.activeRoot = null;
     state.expanded.clear();
@@ -413,23 +513,15 @@ function applyEnvelope(env) {
   if (state.selected && !lostSelected) {
     const nextSelected = state.tasks.get(state.selected);
     if (prevSelected && nextSelected) {
-      const reportChanged = !!nextSelected.report && (
-        prevSelected.report !== nextSelected.report ||
-        prevSelected.reportAt !== nextSelected.reportAt
-      );
       const becameAwake = prevSelected.state !== 'awake' && nextSelected.state === 'awake';
-      if (reportChanged) {
-        state.inspectorTab = 'report';
-        state.inspectorResetReportTop = true;
-      } else if (becameAwake) {
-        state.inspectorTab = 'run';
+      if (becameAwake) {
         state.inspectorResetRunTop = true;
         state.trajectoryFollow = true;
       }
     }
   }
   if (state.anchorId && !state.tasks.has(state.anchorId)) state.anchorId = null;
-  if (state.selected && state.unread.has(state.selected)) markSeen(state.selected);
+
 
   const awake = currentAwakeTask();
   if (awake && state.activeRoot && !state.find.open && rootOwning(awake.id) === state.activeRoot) {
@@ -440,27 +532,15 @@ function applyEnvelope(env) {
   if (state.find.query.trim()) recomputeFind(false);
   render();
   if (lostSelected && hadSelectedFocus) focusGraph();
-  syncStream();
+  syncStreams();
   if (state.stop.confirming && !workInFlight()) closeStopConfirm();
 }
 
-const svg = d3.select('#graph'), g = svg.append('g'), edgeL = g.append('g'), edgeHitL = g.append('g'), gestureL = g.append('g'), nodeL = g.append('g'), actionL = g.append('g');
-actionL.attr('id', 'node-actions-layer');
-const actionRing = actionL.append('g').attr('id', 'node-actions').style('display', 'none');
-const runAction = actionRing.append('g').attr('class', 'node-action run').attr('role', 'button').attr('tabindex', '0');
-runAction.append('circle').attr('class', 'action-disc').attr('r', 15);
-runAction.append('path').attr('class', 'action-icon').attr('d', 'M-4,-6.5 L7,0 L-4,6.5 Z');
-runAction.append('title');
-const deleteAction = actionRing.append('g').attr('class', 'node-action delete').attr('role', 'button').attr('tabindex', '0');
-deleteAction.append('circle').attr('class', 'action-disc').attr('r', 15);
-deleteAction.append('path').attr('class', 'action-icon').attr('d', 'M-5,-5 L5,5 M5,-5 L-5,5');
-deleteAction.append('title');
-runAction.on('pointerdown', e => e.stopPropagation());
-deleteAction.on('pointerdown', e => e.stopPropagation());
-runAction.on('click', e => { e.stopPropagation(); activateNodeAction('run'); });
-deleteAction.on('click', e => { e.stopPropagation(); activateNodeAction('delete'); });
-runAction.on('keydown', e => actionKeydown(e, 'run'));
-deleteAction.on('keydown', e => actionKeydown(e, 'delete'));
+const svg = d3.select('#graph'), g = svg.append('g'), edgeL = g.append('g'), edgeHitL = g.append('g'), castL = g.append('g'), gestureL = g.append('g'), nodeL = g.append('g');
+castL.attr('id', 'cast-layer').style('display', 'none');
+const castArc = castL.append('path').attr('class', 'cast-arc');
+const castBead = castL.append('circle').attr('class', 'cast-bead').attr('r', 3.2).style('display', 'none');
+const castCompanion = castL.append('circle').attr('class', 'cast-companion').attr('r', 3.4).style('display', 'none');
 gestureL.attr('id', 'gesture-layer').style('display', 'none');
 const gestureArrow = gestureL.append('path').attr('class', 'gesture-arrow').attr('marker-end', 'url(#arr)');
 const gestureEmpty = gestureL.append('g').attr('class', 'gesture-empty-group');
@@ -468,11 +548,11 @@ gestureEmpty.append('circle').attr('class', 'gesture-empty').attr('r', 12);
 gestureEmpty.append('text').attr('class', 'gesture-empty-mark').text('+');
 const edgeProgress = gestureL.append('path').attr('class', 'edge-progress').style('display', 'none');
 const edgeDefs = svg.append('defs');
-for (const [id, size] of [['arr', 6], ['arr-root', 8]]) {
+for (const [id, size] of [['arr', 6], ['arr-root', 6]]) {
   edgeDefs.append('marker')
     .attr('id', id)
     .attr('viewBox', '0 0 10 10')
-    .attr('refX', 9)
+    .attr('refX', 10)
     .attr('refY', 5)
     .attr('markerWidth', size)
     .attr('markerHeight', size)
@@ -481,15 +561,69 @@ for (const [id, size] of [['arr', 6], ['arr-root', 8]]) {
     .attr('d', 'M0,0 L10,5 L0,10 z')
     .attr('fill', 'context-stroke');
 }
+let castTimer = null;
+function stopCast() {
+  if (castTimer) { castTimer.stop(); castTimer = null; }
+  castL.interrupt();
+  castL.style('display', 'none').style('opacity', 1);
+  castArc.attr('marker-end', null);
+  castBead.style('display', 'none');
+  castCompanion.interrupt().style('display', 'none').attr('opacity', 0);
+}
+function queueCast(source, target) {
+  if (!source || !target || source === target) return;
+  stopCast();
+  state.cast = { source, target, at: Date.now() };
+}
+function playCast() {
+  const c = state.cast;
+  if (!c) return;
+  if (reduceMotion() || Date.now() - c.at > 3000) { state.cast = null; return; }
+  const L = state.layout;
+  const s = L && L.nodes.get(c.source), t = L && L.nodes.get(c.target);
+  const edge = L && L.edges.find(e => e.source === c.source && e.target === c.target);
+  const st = state.tasks.get(c.source), tt = state.tasks.get(c.target);
+  if (!s || !t || !edge || s.ghost || t.ghost) return;
+  if (!st || !tt || st.kind !== 'root' || tt.kind !== 'root') { state.cast = null; return; }
+  state.cast = null;
+  castL.style('display', null).style('opacity', 1);
+  castArc.attr('d', (edge && edge.path) || linkCurve(s.x, s.y, arrowBoundary(s, t), t.x, t.y, arrowBoundary(t, s))).attr('marker-end', null);
+  const len = castArc.node().getTotalLength();
+  castArc.attr('stroke-dasharray', String(len)).attr('stroke-dashoffset', String(len));
+  castBead.style('display', null).attr('opacity', .95);
+  castCompanion.style('display', null).attr('opacity', 0);
+  const dist = Math.hypot(t.x - s.x, t.y - s.y) || 1;
+  const nX = -(t.y - s.y) / dist, nY = (t.x - s.x) / dist;
+  const DUR = 520;
+  castTimer = d3.timer(elapsed => {
+    const p = Math.min(1, elapsed / DUR);
+    castArc.attr('stroke-dashoffset', String(len * (1 - p)));
+    const pt = castArc.node().getPointAtLength(len * p);
+    castBead.attr('cx', pt.x).attr('cy', pt.y);
+    if (p < 1) return;
+    castTimer.stop();
+    castTimer = null;
+    castBead.style('display', 'none');
+    castArc.attr('marker-end', 'url(#arr-root)');
+    castCompanion.attr('cx', pt.x + nX * 7).attr('cy', pt.y + nY * 7).attr('opacity', .9)
+      .transition().duration(260).attr('opacity', 0);
+    castL.transition().delay(240).duration(260).style('opacity', 0)
+      .on('end', () => {
+        castL.style('display', 'none').style('opacity', 1);
+        castArc.attr('marker-end', null);
+        castCompanion.style('display', 'none').attr('opacity', 0);
+      });
+  });
+}
+
 const zoom = d3.zoom().scaleExtent([.12, 4]).filter(event => {
   if (event.type !== 'wheel' && event.button) return false;
   const target = event.target;
-  if (event.type !== 'wheel' && target && target.closest && (target.closest('g.node') || target.closest('.edge-hit') || target.closest('.node-action'))) return false;
+  if (event.type !== 'wheel' && target && target.closest && (target.closest('g.node') || target.closest('.edge-hit'))) return false;
   return !event.ctrlKey || event.type === 'wheel';
 }).on('zoom', e => {
   state.viewport = e.transform;
   g.attr('transform', e.transform);
-  paintNodeActions();
   if (state.deleteConfirm.open) positionDeletePopover();
   if (state.runPrompt.open) positionRunPrompt();
 });
@@ -552,10 +686,11 @@ function build() {
       if (L.ghosts.has(id)) {
         const ghost = ghosts.find(x => ghostId(x.title) === id);
         const title = ghost ? ghost.title : id;
-        L.nodes.set(id, { x: nd.x, y: nd.y, r: 18, ghost: true, title, kind: ghost ? ghost.kind : 'simple', label: labelMetrics(title) });
+        L.nodes.set(id, { x: nd.x, y: nd.y, r: 18, ghost: true, title, kind: ghost ? ghost.kind : 'simple', label: labelMetrics(title), labelOffset: 18 + LABEL_GAP });
       } else {
         const t = state.tasks.get(id);
-        L.nodes.set(id, { x: nd.x, y: nd.y, r: nodeRadius(t), label: labelMetrics(t.title), context: contextRoots.has(id) });
+        const r = nodeRadius(t);
+        L.nodes.set(id, { x: nd.x, y: nd.y, r, label: labelMetrics(t.title), labelOffset: labelOffsetFor(r, t.kind, false), context: contextRoots.has(id) });
       }
     }
     for (const e of gg.edges()) {
@@ -570,19 +705,75 @@ function build() {
     }
   } else {
     const rootIds = orderedRoots();
-    L.visible = new Set(rootIds);
     const R = Math.max(200, rootIds.length * 60);
+    const rootPos = new Map();
     rootIds.forEach((id, i) => {
       const ang = (i / Math.max(1, rootIds.length)) * Math.PI * 2 - Math.PI / 2;
+      const x = R * Math.cos(ang), y = R * Math.sin(ang);
+      rootPos.set(id, { x, y, ang });
       const t = state.tasks.get(id);
-      L.nodes.set(id, { x: R * Math.cos(ang), y: R * Math.sin(ang), r: 26, label: labelMetrics(t.title), context: false });
+      L.nodes.set(id, { x, y, r: 26, label: labelMetrics(t.title), labelOffset: 26 + LABEL_GAP, context: false });
     });
-    for (const id of rootIds) {
-      const t = state.tasks.get(id);
-      for (const d of t.deps) {
-        if (L.visible.has(d) && state.tasks.get(d).kind === 'root') {
-          L.edges.push({ source: d, target: id, root: true, context: false });
+
+    const visible = new Set(rootIds);
+    const branchRoot = !findMode && !state.activeRoot && state.selected && state.expanded.size
+      ? rootOwning(state.selected) : null;
+    if (branchRoot && state.tasks.has(branchRoot)) {
+      const branchIds = [...visibleSet(branchRoot)].filter(id =>
+        id !== branchRoot && !rootPos.has(id) && state.tasks.has(id));
+      if (branchIds.length) {
+        const nodes = [branchRoot, ...branchIds];
+        const nodeSet = new Set(nodes);
+        const gg = new dagre.graphlib.Graph();
+        gg.setGraph({ rankdir: 'BT', nodesep: 50, ranksep: 80, marginx: 60, marginy: 60 });
+        gg.setDefaultEdgeLabel(() => ({}));
+        for (const id of nodes) {
+          const t = state.tasks.get(id);
+          const r = nodeRadius(t), lm = labelMetrics(t.title);
+          gg.setNode(id, { width: Math.max(r * 2 + 50, lm.width + 24), height: r * 2 + LABEL_GAP + lm.height });
         }
+        for (const id of nodes) {
+          const t = state.tasks.get(id);
+          for (const d of t.deps) {
+            if (nodeSet.has(d) && state.tasks.has(d)) gg.setEdge(d, id);
+          }
+        }
+        dagre.layout(gg);
+        const anchor = gg.node(branchRoot);
+        const rp = rootPos.get(branchRoot);
+        const phi = rp.ang - Math.PI / 2;
+        const cos = Math.cos(phi), sin = Math.sin(phi);
+        for (const id of branchIds) {
+          const nd = gg.node(id);
+          if (!nd || !anchor) continue;
+          const dx = nd.x - anchor.x, dy = nd.y - anchor.y;
+          const t = state.tasks.get(id);
+          const r = nodeRadius(t);
+          L.nodes.set(id, {
+            x: rp.x + dx * cos - dy * sin,
+            y: rp.y + dx * sin + dy * cos,
+            r,
+            label: labelMetrics(t.title),
+            labelOffset: labelOffsetFor(r, t.kind, false),
+            context: false,
+          });
+          visible.add(id);
+        }
+      }
+    }
+    L.visible = visible;
+    for (const id of visible) {
+      const t = state.tasks.get(id);
+      if (!t) continue;
+      for (const d of t.deps) {
+        const dt = state.tasks.get(d);
+        if (!visible.has(d) || !dt) continue;
+        L.edges.push({
+          source: d,
+          target: id,
+          root: t.kind === 'root' && dt.kind === 'root',
+          context: false,
+        });
       }
     }
     if (ghosts.length) {
@@ -602,13 +793,15 @@ function build() {
     }
   }
 
+  for (const e of L.edges) e.path = routeEdge(L, e);
+
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const p of L.nodes.values()) {
     const lm = p.label || { width: 0, height: 0 };
     minX = Math.min(minX, p.x - Math.max(p.r, lm.width / 2));
     maxX = Math.max(maxX, p.x + Math.max(p.r, lm.width / 2));
     minY = Math.min(minY, p.y - p.r);
-    maxY = Math.max(maxY, p.y + p.r + LABEL_GAP + lm.height);
+    maxY = Math.max(maxY, p.y + (p.labelOffset || p.r + LABEL_GAP) + lm.height);
   }
   if (L.nodes.size) L.bounds = { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
   state.layoutChanged = true;
@@ -633,15 +826,22 @@ function fit() {
   const target = d3.zoomIdentity.translate(w / 2, h / 2).scale(k).translate(-(b.minX + b.maxX) / 2, -(b.minY + b.maxY) / 2);
   applyZoom(target);
 }
-function centerOn(id) {
+function centerOn(id, force = false) {
   const p = state.layout && state.layout.nodes.get(id);
   if (!p) return;
   const graph = document.getElementById('graph');
   const w = canvasWidth(), h = graph.clientHeight || 600;
   const t = state.viewport;
-  const sx = t.applyX(p.x), sy = t.applyY(p.y);
-  if (sx > 60 && sx < w - 60 && sy > 60 && sy < h - 60) return;
-  const k = Math.max(.6, Math.min(t.k || 1, 1.4));
+  if (!force) {
+    const k = Math.max(.6, Math.min(t.k || 1, 1.4));
+    const sx = t.applyX(p.x), sy = t.applyY(p.y);
+    if (sx > 60 && sx < w - 60 && sy > 60 && sy < h - 60) return;
+    applyZoom(d3.zoomIdentity.translate(w / 2, h / 2).scale(k).translate(-p.x, -p.y));
+    return;
+  }
+  // Pan to the selection, keeping the current zoom. The rest of the map is
+  // not hidden; it stays rendered and can be reached by panning or zooming.
+  const k = t.k || 1;
   applyZoom(d3.zoomIdentity.translate(w / 2, h / 2).scale(k).translate(-p.x, -p.y));
 }
 
@@ -649,17 +849,6 @@ function centerOn(id) {
 function focusGraph() {
   const graph = document.getElementById('graph');
   if (graph) graph.focus({ preventScroll: true });
-}
-function actionRingVisible() {
-  const t = state.selected ? state.tasks.get(state.selected) : null;
-  return !!(
-    t &&
-    state.layout && state.layout.nodes.has(state.selected) &&
-    state.mode !== 'sandbox' &&
-    state.gesture.mode === 'idle' &&
-    !state.form.open &&
-    !state.link.open
-  );
 }
 function selectedNodePos() {
   const p = state.layout && state.selected ? state.layout.nodes.get(state.selected) : null;
@@ -671,85 +860,6 @@ function selectedNodePos() {
     if (m) { x = m.matrix.e; y = m.matrix.f; }
   }
   return { x, y, r: p.r };
-}
-function paintNodeActions() {
-  const t = state.selected ? state.tasks.get(state.selected) : null;
-  const p = selectedNodePos();
-  const visible = !!(t && p && actionRingVisible());
-  actionRing.style('display', visible ? null : 'none');
-  if (!visible) {
-    if (!state.selected && actionRing.node().contains(document.activeElement)) focusGraph();
-    return;
-  }
-  const k = state.viewport.k || 1;
-  const offset = p.r + 24 / k;
-  actionRing.attr('transform', `translate(${p.x},${p.y}) scale(${1 / k})`);
-  runAction.attr('transform', `translate(${-offset},0)`);
-  deleteAction.attr('transform', `translate(${offset},0)`);
-
-  const running = state.run.id === t.id && state.run.pending;
-  const rr = runReason(t);
-  runAction
-    .attr('aria-disabled', String(!!rr))
-    .attr('aria-label', rr ? `Run unavailable: ${rr}` : `Run ${t.title}`)
-    .classed('pending', running);
-  runAction.select('title').text(rr || (running ? `Starting ${t.title}` : `Run ${t.title}`));
-
-  const dr = deleteReason(t) || (state.deleteConfirm.open ? 'Delete confirmation is open' : '');
-  deleteAction
-    .attr('aria-disabled', String(!!dr))
-    .attr('aria-label', dr ? `Delete unavailable: ${dr}` : `Delete ${t.title}`);
-  deleteAction.select('title').text(dr || `Delete ${t.title}`);
-  if (state.runPrompt.open) positionRunPrompt();
-}
-let actionTrackToken = 0;
-function trackNodeActions(ms = 360) {
-  const token = ++actionTrackToken;
-  const until = performance.now() + ms;
-  const tick = now => {
-    if (token !== actionTrackToken) return;
-    paintNodeActions();
-    if (now < until) requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
-}
-function activateNodeAction(which) {
-  const t = state.selected ? state.tasks.get(state.selected) : null;
-  if (!t) return;
-  if (which === 'run') {
-    if (runAction.attr('aria-disabled') === 'true') return;
-    openRunPrompt(t.id);
-  } else {
-    if (deleteAction.attr('aria-disabled') === 'true') return;
-    openDeleteConfirm(t.id);
-  }
-}
-function focusAction(which) {
-  if (which === 'node') { focusNode(state.selected); return; }
-  const el = which === 'run' ? runAction.node() : deleteAction.node();
-  if (el) el.focus({ preventScroll: true });
-}
-function focusNextNodeAfter(id) {
-  const groups = [...nodeL.selectAll('g.node').nodes()];
-  const i = groups.findIndex(n => n.getAttribute('data-id') === id);
-  const next = i >= 0 ? groups[i + 1] : null;
-  if (next) next.focus({ preventScroll: true });
-  else focusGraph();
-}
-function actionKeydown(e, which) {
-  if (e.key === 'Enter' || e.key === ' ') {
-    e.preventDefault();
-    e.stopPropagation();
-    activateNodeAction(which);
-    return;
-  }
-  if (e.key === 'Tab') {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.shiftKey) focusAction(which === 'delete' ? 'run' : 'node');
-    else if (which === 'run') focusAction('delete');
-    else focusNextNodeAfter(state.selected);
-  }
 }
 function positionDeletePopover() {
   const pop = document.getElementById('delete-popover');
@@ -789,8 +899,9 @@ function nodeAtPoint(gx, gy) {
     const dx = gx - p.x, dy = gy - p.y;
     const inCore = Math.hypot(dx, dy) <= p.r + 12;
     const lm = p.label;
-    const labelTop = p.y + p.r + LABEL_GAP - LABEL_LINE_H;
-    const labelBottom = p.y + p.r + LABEL_GAP + lm.height;
+    const off = p.labelOffset != null ? p.labelOffset : p.r + LABEL_GAP;
+    const labelTop = p.y + off - LABEL_LINE_H;
+    const labelBottom = p.y + off + lm.height;
     const inLabel = Math.abs(gx - p.x) <= Math.max(lm.width / 2, p.r) && gy >= labelTop && gy <= labelBottom;
     if (!inCore && !inLabel) continue;
     const d = Math.hypot(dx, dy);
@@ -888,9 +999,11 @@ async function submitCreateForm() {
   syncFormState();
   try {
     await createTask(title, state.form.deps.slice());
+    const newDeps = state.form.deps.slice();
     state.form.pending = false;
     endMutation();
     closeCreateForm(false);
+    if (newDeps.length) queueCast(newDeps[0], title);
     showToast(`Created ${title}`);
     await refresh();
   } catch (e) {
@@ -969,14 +1082,12 @@ function openLinkBox() {
   const pane = document.getElementById('map-pane').getBoundingClientRect();
   positionOverlay(box, pane.left + pane.width / 2, pane.top + pane.height / 2);
   renderLinkBox();
-  paintNodeActions();
   requestAnimationFrame(() => input.focus({ preventScroll: true }));
 }
 function closeLinkBox(restoreFocus = true) {
   if (!state.link.open) return;
   state.link = { open: false, taskId: null, query: '', items: [], index: -1, error: null, pending: false };
   document.getElementById('link-box').classList.add('hidden');
-  paintNodeActions();
   if (restoreFocus) focusGraph();
 }
 async function toggleDependency(depId) {
@@ -996,6 +1107,7 @@ async function toggleDependency(depId) {
     endMutation();
     state.link.pending = false;
     closeLinkBox(false);
+    if (!has) queueCast(depId, target);
     showToast(has ? `Removed ${depId} → ${target}` : `Linked ${depId} → ${target}`);
     await refresh();
   } catch (e) {
@@ -1032,7 +1144,7 @@ function closeDeleteConfirm(restoreFocus = true) {
   if (!state.deleteConfirm.open) return;
   state.deleteConfirm = { open: false, pending: false, error: null };
   render();
-  if (restoreFocus) requestAnimationFrame(() => focusAction('delete'));
+  if (restoreFocus && state.selected) focusNodeIfSelected(state.selected);
 }
 async function confirmDeleteTask() {
   const t = state.selected ? state.tasks.get(state.selected) : null;
@@ -1147,9 +1259,10 @@ function openRunPrompt(id) {
 }
 function closeRunPrompt(restoreFocus = true) {
   if (!state.runPrompt.open || state.runPrompt.pending) return;
+  const id = state.runPrompt.taskId;
   state.runPrompt = { open: false, taskId: null, tip: '', tipSaved: false, pending: false, error: null };
   render();
-  if (restoreFocus) requestAnimationFrame(() => focusAction('run'));
+  if (restoreFocus && id) focusNodeIfSelected(id);
 }
 async function submitRunPrompt() {
   const rp = state.runPrompt;
@@ -1175,7 +1288,6 @@ async function submitRunPrompt() {
     state.run = { id: t.id, pending: false };
     rp.pending = false;
     if (state.selected === t.id) {
-      state.inspectorTab = 'run';
       state.inspectorResetRunTop = true;
       state.trajectoryFollow = true;
     }
@@ -1206,6 +1318,9 @@ function clearGestureVisuals() {
   gestureL.style('display', 'none');
   edgeProgress.style('display', 'none');
   gestureArrow.classed('invalid', false);
+  mouthAngles.clear();
+  state.gesture.mouthTargetId = null;
+  paintMouths();
 }
 function teardownGesture(suppressClick = true) {
   clearGestureVisuals();
@@ -1238,7 +1353,6 @@ function startNodeGesture(e, d) {
   g.y = e.clientY;
   g.targetId = null;
   g.targetState = 'empty';
-  paintNodeActions();
   try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
   if (topologyLocked()) {
     g.holdTimer = setTimeout(() => {
@@ -1274,7 +1388,6 @@ function startEdgeGesture(e, d, pathEl) {
   g.edgePath = pathEl;
   g.startX = e.clientX;
   g.startY = e.clientY;
-  paintNodeActions();
   try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
   const len = pathEl.getTotalLength ? pathEl.getTotalLength() : 0;
   gestureL.style('display', null);
@@ -1313,6 +1426,11 @@ function pointInEdge(pathEl, clientX, clientY) {
     return true;
   }
 }
+function setMouth(id, rad) {
+  const t = state.tasks.get(id);
+  if (!t || t.kind !== 'root') return;
+  mouthAngles.set(id, (rad * 180) / Math.PI - 45);
+}
 function paintGesture() {
   const g = state.gesture;
   if (g.mode !== 'dragging') return;
@@ -1333,11 +1451,19 @@ function paintGesture() {
   g.targetId = targetId;
   g.targetState = stateName;
   g.targetReason = reason;
+  if (g.mouthTargetId && g.mouthTargetId !== targetId) mouthAngles.delete(g.mouthTargetId);
+  g.mouthTargetId = null;
+  setMouth(g.sourceId, Math.atan2(p[1] - src.y, p[0] - src.x));
+  if (hit && stateName === 'valid') {
+    setMouth(targetId, Math.atan2(src.y - hit.p.y, src.x - hit.p.x));
+    g.mouthTargetId = targetId;
+  }
+  paintMouths();
   nodeL.selectAll('g.node')
     .classed('drag-source', d => d.id === g.sourceId)
     .classed('drop-valid', d => d.id === targetId && stateName === 'valid')
     .classed('drop-invalid', d => d.id === targetId && stateName === 'invalid');
-  const arrowD = `M${src.x},${src.y + src.r} C${src.x},${(src.y + src.r + p[1]) / 2} ${p[0]},${(src.y + src.r + p[1]) / 2} ${p[0]},${p[1]}`;
+  const arrowD = linkCurve(src.x, src.y, arrowBoundary(src, { x: p[0], y: p[1] }), p[0], p[1], 0);
   gestureArrow.attr('d', arrowD).classed('invalid', stateName === 'invalid');
   if (!hit) {
     gestureEmpty.style('display', null).attr('transform', `translate(${p[0]},${p[1]})`);
@@ -1378,8 +1504,7 @@ function onGestureUp(e) {
   if (g.mode === 'idle' || e.pointerId !== g.pointerId) return;
   if (g.mode === 'pendingNode' || g.mode === 'pendingEdge') {
     teardownGesture(false);
-    paintNodeActions();
-    return;
+      return;
   }
   if (g.mode === 'dragging') { finishNodeDrag(); return; }
   if (g.mode === 'edgeArmed') {
@@ -1402,6 +1527,7 @@ async function addDependency(target, source) {
   try {
     await putDependencies(target, [...t.deps, source]);
     endMutation();
+    queueCast(source, target);
     showToast(`Linked ${source} → ${target}`);
     await refresh();
   } catch (e) {
@@ -1433,13 +1559,12 @@ document.getElementById('graph').addEventListener('contextmenu', e => {
   if (state.gesture.mode !== 'idle') e.preventDefault();
 });
 
-function unreadUnder(id, visible) {
-  if (state.unread.has(id)) return true;
-  const cl = getClosure(id);
-  for (const uid of state.unread.keys()) {
-    if (cl.has(uid) && !visible.has(uid)) return true;
-  }
-  return false;
+function paintMouths() {
+  nodeL.selectAll('g.node').each(function (d) {
+    if (d.kind !== 'root' || d.ghost || d.temp) return;
+    const deg = mouthAngles.get(d.id);
+    d3.select(this).select('.orbit').attr('transform', deg == null ? null : `rotate(${deg})`);
+  });
 }
 
 function paint() {
@@ -1454,9 +1579,8 @@ function paint() {
       kind: p.ghost ? p.kind : (t ? t.kind : 'simple'),
       state: p.ghost ? '' : (t ? t.state : 'sleeping'),
       lines: (p.label && p.label.lines) || [p.title || ''],
-      hasReport: !p.ghost && !p.temp && !!t?.report,
-      unread: !p.ghost && !p.temp && unreadUnder(id, L.visible),
       context: !!p.context,
+      labelOffset: p.ghost || p.temp ? p.r + LABEL_GAP : labelOffsetFor(p.r, t ? t.kind : 'simple', false),
     };
   });
 
@@ -1469,15 +1593,18 @@ function paint() {
 
   const nJoin = nodeL.selectAll('g.node').data(items, d => d.id);
   nJoin.exit().remove();
+  const firstPaint = !state.paintedOnce;
+  const bloomId = firstPaint || reduceMotion() ? null : state.bloomRoot;
+  state.paintedOnce = true;
+  state.bloomRoot = null;
   const ne = nJoin.enter().append('g').attr('class', 'node');
+  ne.append('circle').attr('class', 'hit');
   ne.append('circle').attr('class', 'halo');
-  ne.append('circle').attr('class', 'work-ring');
-  ne.append('circle').attr('class', 'ring2');
-  ne.append('circle').attr('class', 'anchor-ring');
+  const orbitG = ne.append('g').attr('class', 'orbit');
+  orbitG.append('path').attr('class', 'orbit-base').attr('pathLength', 1);
+  orbitG.append('path').attr('class', 'orbit-sweep').attr('pathLength', 1);
   ne.append('circle').attr('class', 'core');
-  ne.append('circle').attr('class', 'report-dot');
-  ne.append('circle').attr('class', 'unread-dot');
-  ne.append('circle').attr('class', 'selection-ring');
+  ne.append('circle').attr('class', 'anchor-ring');
   ne.append('circle').attr('class', 'cursor-ring');
   ne.append('circle').attr('class', 'hold-ring');
   ne.append('circle').attr('class', 'drop-ring');
@@ -1486,27 +1613,20 @@ function paint() {
   merged.each(function (d) {
     const sel = d3.select(this);
     const r = d.r;
-    sel.select('.core').attr('r', r);
+    const coreR = d.ghost || d.temp ? r : ballRadius(r);
+    sel.select('.hit').attr('r', r + 4);
+    sel.select('.core').attr('r', coreR);
     sel.select('.halo').attr('r', r + 9);
-    sel.select('.work-ring').attr('r', r + 13);
-    sel.select('.ring2').attr('r', r + 5);
+    const orbitD = orbitArcPath(r);
+    sel.select('.orbit-base').attr('d', orbitD);
+    sel.select('.orbit-sweep').attr('d', orbitD);
     sel.select('.anchor-ring').attr('r', r + 13);
-    sel.select('.selection-ring').attr('r', r + 8);
     sel.select('.cursor-ring').attr('r', r + 2.5);
     const holdR = r + 11;
     const circ = 2 * Math.PI * holdR;
     sel.select('.hold-ring').attr('r', holdR).attr('stroke-dasharray', `${circ}`).attr('stroke-dashoffset', `${circ}`);
     sel.select('.drop-ring').attr('r', r + 17);
-    sel.select('.report-dot')
-      .attr('cx', r * 0.68)
-      .attr('cy', -r * 0.68)
-      .attr('r', 2.6)
-      .style('display', d.hasReport && !d.ghost && !d.temp ? null : 'none');
-    sel.select('.unread-dot')
-      .attr('cx', -r * 0.68)
-      .attr('cy', -r * 0.68)
-      .attr('r', 3.4);
-    const lab = sel.select('.label').attr('y', r + LABEL_GAP);
+    const lab = sel.select('.label').attr('y', d.labelOffset);
     lab.text(null);
     const lines = d.lines && d.lines.length ? d.lines : [d.title || ''];
     lines.forEach((line, i) => lab.append('tspan').attr('x', 0).attr('dy', i === 0 ? 0 : LABEL_LINE_H).text(i < lines.length - 1 ? `${line} ` : line));
@@ -1523,12 +1643,23 @@ function paint() {
       if (streamConnectionState() === 'reconnecting') cls.push('reconnecting');
     }
     if (d.id === state.selected) cls.push('selected');
-    if (d.unread) cls.push('unread');
     if (d.context) cls.push('context-root');
     if (showRootActivity && d.kind === 'root' && [...awakeIds].some(id => getClosure(d.id).has(id))) cls.push('active-closure');
     sel.attr('class', cls.join(' ')).attr('data-id', d.id).attr('aria-description', null);
     if (!animate) sel.attr('transform', `translate(${d.x},${d.y})`);
   });
+  if (bloomId) {
+    const b = merged.filter(d => d.id === bloomId);
+    if (!b.empty()) {
+      b.classed('bloom', true);
+      b.each(function () {
+        const n = this;
+        const done = () => { n.classList.remove('bloom'); n.removeEventListener('animationend', done); };
+        n.addEventListener('animationend', done);
+        setTimeout(done, 700);
+      });
+    }
+  }
   merged
     .attr('tabindex', d => (d.ghost || d.temp ? null : '0'))
     .attr('role', d => (d.ghost || d.temp ? null : 'button'))
@@ -1536,8 +1667,6 @@ function paint() {
       if (d.ghost || d.temp) return null;
       const bits = [d.title, d.state];
       if (d.context) bits.push('related root context');
-      if (d.hasReport) bits.push('reported');
-      if (d.unread) bits.push('unread report');
       return bits.join(', ');
     });
   merged.on('click', (e, d) => {
@@ -1551,12 +1680,6 @@ function paint() {
     startNodeGesture(e, d);
   });
   merged.on('keydown', (e, d) => {
-    if (e.key === 'Tab' && !e.shiftKey && state.selected === d.id && actionRingVisible()) {
-      e.preventDefault();
-      e.stopPropagation();
-      focusAction('run');
-      return;
-    }
     if (e.key !== 'Enter' && e.key !== ' ') return;
     e.preventDefault();
     e.stopPropagation();
@@ -1564,29 +1687,14 @@ function paint() {
   });
 
   if (animate) {
-    ne.style('opacity', 0);
+    ne.style('opacity', d => (d.id === bloomId ? 1 : 0));
     merged.transition().duration(280).attr('transform', d => `translate(${d.x},${d.y})`).style('opacity', 1);
   } else {
     merged.attr('transform', d => `translate(${d.x},${d.y})`);
   }
 
   const edgeKey = d => d.source + '>' + d.target;
-  const edgePath = d => {
-    const s = L.nodes.get(d.source), t = L.nodes.get(d.target);
-    if (!s || !t) return '';
-    if (d.root) {
-      const dx = t.x - s.x, dy = t.y - s.y;
-      const dist = Math.hypot(dx, dy) || 1;
-      const ux = dx / dist, uy = dy / dist;
-      const sx = s.x + ux * (s.r + 2), sy = s.y + uy * (s.r + 2);
-      const ex = t.x - ux * (t.r + 8), ey = t.y - uy * (t.r + 8);
-      const mx = (sx + ex) / 2, my = (sy + ey) / 2;
-      const nx = -uy, ny = ux;
-      const bend = Math.min(96, Math.max(26, dist * 0.16));
-      return `M${sx},${sy} Q${mx + nx * bend},${my + ny * bend} ${ex},${ey}`;
-    }
-    return `M${s.x},${s.y + s.r} C${s.x},${(s.y + s.r + t.y - t.r) / 2} ${t.x},${(s.y + s.r + t.y - t.r) / 2} ${t.x},${t.y - t.r - 6}`;
-  };
+  const edgePath = d => d.path || '';
   const eJoin = edgeL.selectAll('path.edge').data(L.edges, edgeKey);
   eJoin.exit().remove();
   const ee = eJoin.enter().append('path').attr('class', 'edge').attr('marker-end', 'url(#arr)');
@@ -1628,7 +1736,8 @@ function paint() {
   });
   svg.classed('find-active', findActive);
   state.layoutChanged = false;
-  if (animate && state.selected) trackNodeActions();
+  paintMouths();
+  playCast();
 }
 
 function render() {
@@ -1659,10 +1768,16 @@ function render() {
     } else if (state.gesture.mode !== 'idle') {
       paintGesture();
     }
+  } else {
+    state.bloomRoot = null;
+  }
+  if (state.centerOnSelect && state.layout && state.layout.nodes.has(state.centerOnSelect)) {
+    const id = state.centerOnSelect;
+    state.centerOnSelect = null;
+    centerOn(id, true);
   }
   renderInspector();
   paintSteer();
-  paintNodeActions();
   renderDeletePopover();
   paintRunPrompt();
   paintTop();
@@ -2060,12 +2175,10 @@ function renderInspector() {
     state.inspectorTrajectorySig = null;
     state.inspectorTrajectoryCount = 0;
     state.inspectorInstruction = null;
-    state.inspectorLastPaintedTab = null;
     return;
   }
   const title = document.getElementById('inspector-title');
   const runPanel = document.getElementById('inspector-run-panel');
-  const reportPanel = document.getElementById('inspector-report-panel');
   if (title.textContent !== t.title) title.textContent = t.title;
 
   const instruction = t.instruction || '';
@@ -2081,10 +2194,8 @@ function renderInspector() {
     const instructionChanged = same && state.inspectorInstruction !== instruction;
     const resetTrajectory = trajChanged && traj.length === 0;
     const resetRun = taskChanged || state.inspectorResetRunTop;
-    const resetReport = taskChanged || state.inspectorResetReportTop;
     const grew = same && traj.length > state.inspectorTrajectoryCount;
     const oldRunScroll = runPanel.scrollTop;
-    const oldReportScroll = reportPanel.scrollTop;
     const oldRunH = runPanel.scrollHeight;
     if (taskChanged || resetTrajectory) state.trajectoryFollow = true;
     state.inspectorSig = sig;
@@ -2093,7 +2204,6 @@ function renderInspector() {
     state.inspectorTrajectoryCount = traj.length;
     state.inspectorInstruction = instruction;
     state.inspectorResetRunTop = false;
-    state.inspectorResetReportTop = false;
 
     const taskBlock = el('section', { class: 'task-block' }, [
       el('div', { class: 'inspector-label', text: 'Task' }),
@@ -2133,23 +2243,26 @@ function renderInspector() {
         el('span', { class: 'trajectory-running-label', text: runningText }),
       ])
       : null;
-    runPanel.replaceChildren(taskBlock, trajBlock, ...(runningBlock ? [runningBlock] : []));
-    reportPanel.replaceChildren();
-    if (t.report) reportPanel.append(renderReport(t.report));
-    else reportPanel.append(el('div', { class: 'inspector-empty', id: 'inspector-empty', text: 'No report yet.' }));
+    const reportBlock = t.report
+      ? el('section', { class: 'inspector-report-block' }, [
+        el('div', { class: 'inspector-label', text: 'Report' }),
+        renderReport(t.report),
+      ])
+      : null;
+    runPanel.replaceChildren(
+      taskBlock,
+      trajBlock,
+      ...(runningBlock ? [runningBlock] : []),
+      ...(reportBlock ? [reportBlock] : []),
+    );
 
     const newRunH = runPanel.scrollHeight;
-    const runActive = state.inspectorTab === 'run';
     if (resetRun) {
       setInspectorScroll(runPanel, 0);
-    } else if (runActive) {
-      if (!state.trajectoryFollow) setInspectorScroll(runPanel, oldRunScroll + (newRunH - oldRunH));
-    } else {
-      runPanel.scrollTop = oldRunScroll;
+    } else if (!state.trajectoryFollow) {
+      setInspectorScroll(runPanel, oldRunScroll + (newRunH - oldRunH));
     }
-    reportPanel.scrollTop = resetReport ? 0 : oldReportScroll;
-
-    if (runActive && state.trajectoryFollow && (taskChanged || resetRun || trajChanged || instructionChanged || resetTrajectory)) {
+    if (state.trajectoryFollow && (taskChanged || resetRun || trajChanged || instructionChanged || resetTrajectory)) {
       requestAnimationFrame(() => scrollLatestTrajectory(runPanel));
     }
   }
@@ -2157,44 +2270,8 @@ function renderInspector() {
   if (state.inspectorResetRunTop) {
     state.inspectorResetRunTop = false;
     setInspectorScroll(runPanel, 0);
-    if (state.inspectorTab === 'run' && state.trajectoryFollow) {
-      requestAnimationFrame(() => scrollLatestTrajectory(runPanel));
-    }
+    if (state.trajectoryFollow) requestAnimationFrame(() => scrollLatestTrajectory(runPanel));
   }
-  if (state.inspectorResetReportTop) {
-    state.inspectorResetReportTop = false;
-    reportPanel.scrollTop = 0;
-  }
-  paintInspectorView();
-}
-
-function paintInspectorView() {
-  const t = state.selected ? state.tasks.get(state.selected) : null;
-  if (!t) return;
-  const runPanel = document.getElementById('inspector-run-panel');
-  const reportPanel = document.getElementById('inspector-report-panel');
-  const tabRun = document.getElementById('inspector-tab-run');
-  const tabReport = document.getElementById('inspector-tab-report');
-  const tabs = document.getElementById('inspector-tabs');
-  const active = state.inspectorTab === 'report' ? 'report' : 'run';
-  const prev = state.inspectorLastPaintedTab;
-  const activeEl = document.activeElement;
-  const inspector = document.getElementById('inspector');
-  const inInspector = inspector.contains(activeEl);
-  const inTablist = tabs.contains(activeEl);
-  const inHiddenPanel = active === 'run' ? reportPanel.contains(activeEl) : runPanel.contains(activeEl);
-
-  runPanel.classList.toggle('hidden', active !== 'run');
-  reportPanel.classList.toggle('hidden', active !== 'report');
-  tabRun.setAttribute('aria-selected', String(active === 'run'));
-  tabReport.setAttribute('aria-selected', String(active === 'report'));
-  tabRun.tabIndex = active === 'run' ? 0 : -1;
-  tabReport.tabIndex = active === 'report' ? 0 : -1;
-
-  if (prev && prev !== active && inInspector && (inTablist || inHiddenPanel)) {
-    (active === 'run' ? tabRun : tabReport).focus({ preventScroll: true });
-  }
-  state.inspectorLastPaintedTab = active;
 }
 
 /* ---- steering ---- */
@@ -2332,20 +2409,8 @@ steerInput.addEventListener('compositionend', () => {
 });
 document.getElementById('inspector-steer-submit').onclick = submitSteer;
 
-function setInspectorTab(tab) {
-  if (tab !== 'run' && tab !== 'report') return;
-  if (state.inspectorTab === tab) return;
-  state.inspectorTab = tab;
-  render();
-  if (tab === 'run' && state.trajectoryFollow) {
-    requestAnimationFrame(() => {
-      if (state.inspectorTab === 'run') scrollLatestTrajectory(document.getElementById('inspector-run-panel'));
-    });
-  }
-}
-
 document.getElementById('inspector-run-panel').addEventListener('scroll', () => {
-  if (!state.selected || state.inspectorTab !== 'run' || performance.now() < state.scrollGuardUntil) return;
+  if (!state.selected || performance.now() < state.scrollGuardUntil) return;
   const box = document.getElementById('inspector-run-panel');
   const latest = box.querySelector('#trajectory-running') || box.querySelector('.trajectory-step:last-child');
   if (!latest) return;
@@ -2355,6 +2420,13 @@ document.getElementById('inspector-run-panel').addEventListener('scroll', () => 
 
 function focusNode(id) {
   requestAnimationFrame(() => {
+    const n = document.querySelector(`g.node[data-id="${CSS.escape(String(id))}"]`);
+    if (n) n.focus({ preventScroll: true });
+  });
+}
+function focusNodeIfSelected(id) {
+  requestAnimationFrame(() => {
+    if (!id || state.selected !== id) return;
     const n = document.querySelector(`g.node[data-id="${CSS.escape(String(id))}"]`);
     if (n) n.focus({ preventScroll: true });
   });
@@ -2376,6 +2448,7 @@ function closeInspector() {
 }
 function overview() {
   state.mode = 'map';
+  state.centerOnSelect = null;
   state.activeRoot = null;
   state.expanded = new Set();
   state.selected = null;
@@ -2400,17 +2473,30 @@ function selectNode(id) {
   if (state.find.open) closeFind(false);
   state.mode = 'map';
   const alreadySelected = state.selected === id;
-  const rootChanged = state.activeRoot !== root;
-  if (rootChanged) {
-    state.activeRoot = root;
-    state.expanded = new Set([root]);
+  let shouldFit = false;
+  if (state.activeRoot) {
+    // Situation-driven focus keeps its existing branch behavior.
+    const rootChanged = state.activeRoot !== root;
+    if (rootChanged) {
+      state.activeRoot = root;
+      state.expanded = new Set([root]);
+    } else {
+      state.expanded.add(root);
+    }
+    if (t.kind !== 'simple') state.expanded.add(id);
+    const before = [...state.expanded].sort().join('|');
+    ensurePath(root, id);
+    const after = [...state.expanded].sort().join('|');
+    shouldFit = rootChanged || before !== after;
   } else {
-    state.expanded.add(root);
+    // Overview: unfold this branch in place, keep every root, and center the
+    // selected node without changing the zoom.
+    state.expanded = new Set();
+    ensurePath(root, id);
+    if (t.deps.length) state.expanded.add(id);
+    state.fitPending = false;
+    state.centerOnSelect = id;
   }
-  if (t.kind !== 'simple') state.expanded.add(id);
-  const before = [...state.expanded].sort().join('|');
-  ensurePath(root, id);
-  const after = [...state.expanded].sort().join('|');
   state.selected = id;
   if (!alreadySelected) {
     state.inspectorSig = null;
@@ -2418,19 +2504,16 @@ function selectNode(id) {
     state.inspectorTrajectorySig = null;
     state.inspectorTrajectoryCount = 0;
     state.inspectorInstruction = null;
-    state.inspectorTab = (t.state === 'awake' || !t.report) ? 'run' : 'report';
     state.inspectorResetRunTop = false;
-    state.inspectorResetReportTop = false;
-    state.inspectorLastPaintedTab = null;
     state.trajectoryFollow = true;
     state.deleteConfirm = { open: false, pending: false, error: null };
   }
-  markSeen(id);
-  if (rootChanged || before !== after) state.fitPending = true;
+  if (shouldFit) state.fitPending = true;
   render();
 }
 function mapActivate(d) {
   if (!d || d.ghost || d.temp) return;
+  if (state.selected === d.id) { openRunPrompt(d.id); return; }
   selectNode(d.id);
 }
 
@@ -2816,17 +2899,6 @@ document.getElementById('brand').addEventListener('keydown', e => {
 });
 document.getElementById('breadcrumb').onclick = overview;
 document.getElementById('inspector-close').onclick = closeInspector;
-document.getElementById('inspector-tab-run').onclick = () => setInspectorTab('run');
-document.getElementById('inspector-tab-report').onclick = () => setInspectorTab('report');
-document.getElementById('inspector-tabs').addEventListener('keydown', e => {
-  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
-  e.preventDefault();
-  const next = e.key === 'Home' ? 'run'
-    : e.key === 'End' ? 'report'
-      : state.inspectorTab === 'run' ? 'report' : 'run';
-  setInspectorTab(next);
-  document.getElementById(`inspector-tab-${next}`).focus({ preventScroll: true });
-});
 document.getElementById('delete-popover-cancel').onclick = () => closeDeleteConfirm();
 document.getElementById('delete-popover-yes').onclick = confirmDeleteTask;
 document.getElementById('run-popover-cancel').onclick = () => closeRunPrompt();
@@ -2906,13 +2978,12 @@ document.addEventListener('pointerdown', e => {
   }
   if (state.deleteConfirm.open) {
     const box = document.getElementById('delete-popover');
-    const btn = document.querySelector('#node-actions .node-action.delete');
-    if (!box.contains(e.target) && !(btn && btn.contains(e.target))) { closeDeleteConfirm(); }
+    if (!box.contains(e.target)) { closeDeleteConfirm(); }
   }
   if (state.runPrompt.open) {
     const box = document.getElementById('run-popover');
-    const actions = document.querySelector('#node-actions');
-    if (!box.contains(e.target) && !(actions && actions.contains(e.target))) {
+    const node = document.querySelector(`g.node[data-id="${CSS.escape(String(state.runPrompt.taskId || ''))}"]`);
+    if (!box.contains(e.target) && !(node && node.contains(e.target))) {
       state.gesture.suppressClickUntil = Date.now() + 400;
       closeRunPrompt();
     }
@@ -3049,9 +3120,7 @@ document.addEventListener('keydown', e => {
   }
 });
 
-/* ---- token heartbeat ---- */
-let streamAbort = null, streamRetryTimer = null, streamBackoff = 1000;
-
+/* ---- streams ---- */
 function streamConnectionState() {
   const s = state.stream;
   if (s.status === 'idle') return 'idle';
@@ -3062,77 +3131,16 @@ function streamConnectionState() {
   return 'connected';
 }
 
-function syncStream() {
-  const awake = currentAwakeTask();
-  if (!awake || document.hidden) {
-    if (streamAbort || streamRetryTimer || state.stream.status !== 'idle') closeStream();
-    return;
-  }
-  if (streamAbort || streamRetryTimer) return;
-  connectStream();
+function syncStreams() {
+  actionsStream.sync();
+  tokensStream.sync();
 }
-function connectStream() {
-  const awake = currentAwakeTask();
-  if (!awake || document.hidden || streamAbort) return;
-  const ctrl = new AbortController();
-  streamAbort = ctrl;
-  const s = state.stream;
-  s.status = 'connecting';
-  if (s.task && s.task !== awake.id) {
-    s.action = null;
-  }
-  s.task = awake.id;
-  s.lastChunkAt = null;
-  s.lastPingAt = null;
-  s.chunkTimes = [];
-  s.rate = 0;
-  if (s.pulseTimer) { clearTimeout(s.pulseTimer); s.pulseTimer = null; }
-  runStream(ctrl);
+function closeStreams() {
+  actionsStream.close();
+  tokensStream.close();
 }
-async function runStream(ctrl) {
-  const s = state.stream;
-  try {
-    const res = await fetch(STREAM_URL, {
-      signal: ctrl.signal,
-      headers: { accept: 'text/event-stream' },
-      cache: 'no-store',
-    });
-    if (ctrl.signal.aborted) return;
-    if (res.status === 404) {
-      if (streamAbort === ctrl) streamAbort = null;
-      if (currentAwakeTask()) {
-        s.status = 'ended';
-        scheduleStreamRetry(2000);
-      } else {
-        closeStream();
-      }
-      return;
-    }
-    if (!res.ok || !res.body) throw new Error(String(res.status));
-    s.status = 'open';
-    s.lastPingAt = Date.now();
-    streamBackoff = 1000;
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
-      let idx;
-      while ((idx = buf.indexOf('\n\n')) >= 0) {
-        handleFrame(buf.slice(0, idx));
-        buf = buf.slice(idx + 2);
-      }
-    }
-    if (!ctrl.signal.aborted) onStreamEnd();
-  } catch (e) {
-    if (!ctrl.signal.aborted) onStreamEnd();
-  } finally {
-    if (streamAbort === ctrl) streamAbort = null;
-  }
-}
-function handleFrame(frame) {
+
+function parseFrame(frame) {
   let event = '', commented = false;
   const data = [];
   for (const line of frame.split('\n')) {
@@ -3141,10 +3149,130 @@ function handleFrame(frame) {
     if (line.startsWith('event:')) event = line.slice(6).trim();
     else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
   }
-  if (commented) onPing();
-  if (event) onChunk(event, decodeStreamData(data.join('\n')));
+  return { event, commented, data: data.join('\n') };
 }
-function onPing() {
+
+function makeStream({ url, slice, onStart, onReady, onData, onPing, onEnd, onClose }) {
+  let abort = null, retryTimer = null, backoff = 1000;
+
+  function sync() {
+    if (!currentAwakeTask() || document.hidden) {
+      if (abort || retryTimer || slice.status !== 'idle') close();
+      return;
+    }
+    if (abort || retryTimer) return;
+    connect();
+  }
+  function connect() {
+    const awake = currentAwakeTask();
+    if (!awake || document.hidden || abort) return;
+    const ctrl = new AbortController();
+    abort = ctrl;
+    slice.status = 'connecting';
+    if (onStart) onStart(awake);
+    run(ctrl);
+  }
+  async function run(ctrl) {
+    try {
+      const res = await fetch(url, {
+        signal: ctrl.signal,
+        headers: { accept: 'text/event-stream' },
+        cache: 'no-store',
+      });
+      if (ctrl.signal.aborted) return;
+      if (res.status === 404) {
+        if (abort === ctrl) abort = null;
+        if (currentAwakeTask()) {
+          slice.status = 'ended';
+          retry(2000);
+        } else {
+          close();
+        }
+        return;
+      }
+      if (!res.ok || !res.body) throw new Error(String(res.status));
+      slice.status = 'open';
+      backoff = 1000;
+      if (onReady) onReady();
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) >= 0) {
+          const frame = parseFrame(buf.slice(0, idx));
+          buf = buf.slice(idx + 2);
+          if (frame.commented) onPing();
+          if (frame.event || frame.data) onData(frame.event, frame.data);
+        }
+      }
+      if (!ctrl.signal.aborted) end();
+    } catch (e) {
+      if (!ctrl.signal.aborted) end();
+    } finally {
+      if (abort === ctrl) abort = null;
+    }
+  }
+  function end() {
+    if (slice.status === 'idle') return;
+    slice.status = 'ended';
+    retry();
+    if (onEnd) onEnd();
+  }
+  function retry(delay) {
+    if (retryTimer) return;
+    const wait = delay != null ? delay : backoff;
+    backoff = Math.min(backoff * 2, 10000);
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      if (currentAwakeTask() && !document.hidden) connect();
+      else close();
+    }, wait);
+  }
+  function close() {
+    if (abort) { const a = abort; abort = null; a.abort(); }
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    slice.status = 'idle';
+    if (onClose) onClose();
+  }
+  return { sync, close };
+}
+
+const actionsStream = makeStream({
+  url: ACTIONS_STREAM_URL,
+  slice: state.stream,
+  onStart(awake) {
+    const s = state.stream;
+    if (s.task && s.task !== awake.id) s.action = null;
+    s.task = awake.id;
+    s.lastChunkAt = null;
+    s.lastPingAt = null;
+    s.chunkTimes = [];
+    s.rate = 0;
+    if (s.pulseTimer) { clearTimeout(s.pulseTimer); s.pulseTimer = null; }
+  },
+  onReady() { state.stream.lastPingAt = Date.now(); },
+  onData(event, raw) {
+    if (event) onChunk(event, decodeStreamData(raw));
+  },
+  onPing() { onStreamPing(); },
+  onEnd() { state.stream.rate = 0; streamRefreshSoon(); },
+  onClose() { resetActionStream(); },
+});
+
+const tokensStream = makeStream({
+  url: TOKENS_STREAM_URL,
+  slice: state.tokens,
+  onData(event, raw) {
+    appendTokens(tokenChunk(raw));
+  },
+  onPing() {},
+  onClose() { resetTokenTape(); },
+});
+function onStreamPing() {
   const s = state.stream;
   s.lastPingAt = Date.now();
   emitPingPulse(s.task);
@@ -3221,30 +3349,9 @@ function streamRefreshSoon() {
   state.stream.lastRefreshAt = now;
   refresh();
 }
-function onStreamEnd() {
-  const s = state.stream;
-  if (s.status === 'idle') return;
-  s.status = 'ended';
-  s.rate = 0;
-  scheduleStreamRetry();
-  streamRefreshSoon();
-}
-function scheduleStreamRetry(delay) {
-  if (streamRetryTimer) return;
-  const wait = delay != null ? delay : streamBackoff;
-  streamBackoff = Math.min(streamBackoff * 2, 10000);
-  streamRetryTimer = setTimeout(() => {
-    streamRetryTimer = null;
-    if (currentAwakeTask() && !document.hidden) connectStream();
-    else closeStream();
-  }, wait);
-}
-function closeStream() {
-  if (streamAbort) { const a = streamAbort; streamAbort = null; a.abort(); }
-  if (streamRetryTimer) { clearTimeout(streamRetryTimer); streamRetryTimer = null; }
+function resetActionStream() {
   const s = state.stream;
   if (s.pulseTimer) { clearTimeout(s.pulseTimer); s.pulseTimer = null; }
-  s.status = 'idle';
   s.task = null;
   s.lastChunkAt = null;
   s.lastPingAt = null;
@@ -3256,6 +3363,129 @@ function closeStream() {
   nodeL.selectAll('.token-pulse, .ping-pulse').remove();
   updateNodeActivity(Date.now());
   paintActivity();
+}
+
+function appendTokens(raw) {
+  const s = state.tokens;
+  s.buffer += String(raw == null ? '' : raw);
+  if (s.buffer.length > TOKEN_SPILL_MAX) s.buffer = s.buffer.slice(-TOKEN_SPILL_MAX / 2);
+  scheduleTokenPaint();
+}
+function tokenChunk(raw) {
+  const text = String(raw == null ? '' : raw);
+  if (!text.trim()) return '';
+  try {
+    const value = JSON.parse(text);
+    if (typeof value === 'string') return value;
+    if (value && typeof value === 'object') {
+      const chunk = value.chunk;
+      if (typeof chunk === 'string') return chunk;
+      if (chunk == null) return '';
+      return typeof chunk === 'object' ? JSON.stringify(chunk) : String(chunk);
+    }
+    return '';
+  } catch (e) {
+    return text;
+  }
+}
+function scheduleTokenPaint() {
+  const s = state.tokens;
+  if (s.paintTimer) return;
+  s.paintTimer = setTimeout(() => {
+    s.paintTimer = null;
+    paintTokens(false);
+  }, TOKEN_PAINT_MS);
+}
+function cleanTokenText(raw) {
+  return String(raw == null ? '' : raw)
+    .replace(/[\u0000-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^ /, '');
+}
+function tokenTail() {
+  let tail = state.tokens.buffer.slice(-TOKEN_BUFFER_TRIM);
+  const c = tail.charCodeAt(0);
+  if (c >= 0xDC00 && c <= 0xDFFF) tail = tail.slice(1);
+  return tail;
+}
+function tapeShift() {
+  const tape = document.getElementById('token-tape');
+  const node = document.getElementById('token-tape-text');
+  if (!tape || !node) return 0;
+  const cs = getComputedStyle(tape);
+  const pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+  if (!tape.clientWidth) return 0;
+  return Math.max(0, node.offsetWidth - (tape.clientWidth - pad));
+}
+function applyTapePosition() {
+  const node = document.getElementById('token-tape-text');
+  if (node) node.style.transform = `translateX(${-state.tokens.pos}px)`;
+}
+function glideTape() {
+  const s = state.tokens;
+  if (s.glideRaf) return;
+  let last = performance.now();
+  const step = now => {
+    s.glideRaf = 0;
+    const dist = s.target - s.pos;
+    const dt = Math.max(1, now - last);
+    last = now;
+    if (dist <= 0.5) {
+      s.pos = s.target;
+      applyTapePosition();
+      return;
+    }
+    // Move at the rate the text is actually arriving so the line reads as
+    // continuous motion instead of a burst followed by a pause.
+    s.pos += Math.min(dist, Math.max(Math.min(s.speed * dt, 40), dt * 0.05));
+    applyTapePosition();
+    s.glideRaf = requestAnimationFrame(step);
+  };
+  s.glideRaf = requestAnimationFrame(step);
+}
+function paintTokens(snap) {
+  const tape = document.getElementById('token-tape');
+  const node = document.getElementById('token-tape-text');
+  if (!tape || !node) return;
+  const s = state.tokens;
+  const trimmed = s.buffer.length > TOKEN_BUFFER_MAX;
+  if (trimmed) s.buffer = tokenTail();
+  const text = cleanTokenText(s.buffer);
+  if (node.textContent !== text) node.textContent = text;
+  const now = performance.now();
+  const prevTarget = s.target;
+  s.target = tapeShift();
+  if (trimmed) {
+    // Trimming removes characters the user cannot see, so the offset shrinks by
+    // the same width. The visible glyphs do not move and the glide continues.
+    s.pos = Math.max(0, s.pos - (prevTarget - s.target));
+    applyTapePosition();
+  }
+  const dt = now - s.targetAt;
+  if (!trimmed && snap !== true && dt > 0 && dt < 500 && s.target >= prevTarget) {
+    const inst = (s.target - prevTarget) / dt;
+    s.speed = s.speed ? Math.min(3, s.speed * 0.5 + inst * 0.5) : Math.min(3, inst);
+  } else if (!trimmed) {
+    s.speed = 0;
+  }
+  s.targetAt = now;
+  if (snap || reduceMotion()) {
+    s.pos = s.target;
+    applyTapePosition();
+  } else {
+    glideTape();
+  }
+}
+function resetTokenTape() {
+  const s = state.tokens;
+  if (s.paintTimer) { clearTimeout(s.paintTimer); s.paintTimer = null; }
+  if (s.glideRaf) { cancelAnimationFrame(s.glideRaf); s.glideRaf = 0; }
+  s.buffer = '';
+  s.pos = 0;
+  s.target = 0;
+  s.targetAt = 0;
+  s.speed = 0;
+  paintTokens(true);
 }
 function updateNodeActivity(now) {
   const s = state.stream;
@@ -3329,16 +3559,18 @@ const mapObserver = new ResizeObserver(entries => {
   mapW = w;
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
-    if (state.mode === 'map' && state.gesture.mode === 'idle' && !state.form.open && state.layout && state.layout.bounds) fit();
+    if (state.mode !== 'map' || state.gesture.mode !== 'idle' || state.form.open || !state.layout || !state.layout.bounds) return;
+    if (state.selected && state.layout.nodes.has(state.selected)) centerOn(state.selected, true);
+    else fit();
   }, 180);
 });
 mapObserver.observe(document.getElementById('map-pane'));
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) closeStream();
+  if (document.hidden) closeStreams();
   else refresh();
 });
-window.addEventListener('pagehide', () => closeStream());
+window.addEventListener('pagehide', () => closeStreams());
 setInterval(tickHeartbeat, 100);
 
 render();

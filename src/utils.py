@@ -26,7 +26,8 @@ class Task:
 class Metrics:
     """Model metrics"""
     last_action_time: float = None
-    actions: int = 0
+    actions: int = 0        # total amount of actions taken
+    time: float = 0         # total elapsed time between actions
     apm: float = 0
     # prompt_tokens: int = 0
     # completion_tokens: int = 0
@@ -87,15 +88,20 @@ class State:
 # # # #         self.react = _RecoveringPredict(self.react)
 
 def update_action_metrics(state: State, action_count: int):
+    """Update the action metrics"""
+    log_internal_event(f"Updating action metrics: {action_count} actions.")
     # Update action metrics
     state.metrics.actions += action_count
+    # state.metrics.time += time.time() - state.metrics.last_action_time
     if state.metrics.last_action_time is not None:
         # avg between current apm and new apm
-        state.metrics.apm = (
-            state.metrics.apm + (
-               action_count / (time.time() - state.metrics.last_action_time)
-            )
-        ) / 2.0
+        # state.metrics.apm = (
+        #     state.metrics.apm + (
+        #        action_count / (time.time() - state.metrics.last_action_time)
+        #     )
+        # ) / 2.0
+        # state.metrics.apm = state.metrics.actions / state.metrics.time
+        state.metrics.apm = action_count / (time.time() - state.metrics.last_action_time)
     state.metrics.last_action_time = time.time()
 
 
