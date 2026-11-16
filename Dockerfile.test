@@ -16,6 +16,7 @@ COPY ./requirements.txt ./requirements.txt
 RUN python3 -m pip install -r requirements.txt
 COPY ./src ./src
 COPY ./cli.py ./cli.py
+COPY ./backend.py ./backend.py
 COPY ./test_optimus.py ./test_optimus.py
 # COPY ./mcp.json ~/.optimus/mcp.json
 

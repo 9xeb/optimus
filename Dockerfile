@@ -8,7 +8,7 @@ FROM python:3.12
 COPY ./requirements.txt ./requirements.txt
 RUN python3 -m pip install -r requirements.txt
 COPY ./src ./src
-COPY ./dist ./dist
+# COPY ./dist ./dist
 COPY ./cli.py ./cli.py
 COPY ./backend.py ./backend.py
 # COPY ./index.html ./index.html
