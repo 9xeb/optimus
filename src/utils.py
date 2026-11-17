@@ -89,7 +89,7 @@ class State:
 
 def update_action_metrics(state: State, action_count: int):
     """Update the action metrics"""
-    log_internal_event(f"Updating action metrics: {action_count} actions.")
+    log_internal_event(f"[OPTIMUS] Updating action metrics: {action_count} actions.")
     # Update action metrics
     state.metrics.actions += action_count
     # state.metrics.time += time.time() - state.metrics.last_action_time
@@ -101,8 +101,8 @@ def update_action_metrics(state: State, action_count: int):
         #     )
         # ) / 2.0
         # state.metrics.apm = state.metrics.actions / state.metrics.time
-        state.metrics.apm = action_count / (time.time() - state.metrics.last_action_time)
-    state.metrics.last_action_time = time.time()
+        state.metrics.apm = float(action_count) / ((time.time() - state.metrics.last_action_time) / 60.0)
+    state.metrics.last_action_time = time.time() / 60.0
 
 
 def prettify_chunk(chunk: dspy.streaming.StreamResponse):

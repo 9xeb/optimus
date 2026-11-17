@@ -414,13 +414,13 @@ class RCS(dspy.Module):
         log_internal_event(f"Returning tasks: {subtasks}")
         # await self.state.actions.put({"task": self.state.parent.title, "data": "Collecting reports..."})
 
-        tips_from_user = []
-        if len(self.state.tasks[self.state.current.title]["tips"]) > 0:
-            # Promote tips to examples in parent, and consume tips
-            self.state.tasks[self.state.parent.title]["examples"] += self.state.tasks[self.state.current.title]["tips"]
-            tips_from_user = self.state.tasks[self.state.current.title]["tips"] # remember tips going up
-            self.state.tasks[self.state.current.title]["tips"] = []
-            log_internal_event(f"[RCS] Some tips were found going up. {output}")
+        # # # # tips_from_user = []
+        # # # # if len(self.state.tasks[self.state.current.title]["tips"]) > 0:
+        # # # #     # Promote tips to examples in parent, and consume tips
+        # # # #     self.state.tasks[self.state.parent.title]["examples"] += self.state.tasks[self.state.current.title]["tips"]
+        # # # #     tips_from_user = self.state.tasks[self.state.current.title]["tips"] # remember tips going up
+        # # # #     self.state.tasks[self.state.current.title]["tips"] = []
+        # # # #     log_internal_event(f"[RCS] Some tips were found going up. {output}")
             
         return [
             {"title": task.title} | self.state.tasks[task.title]
@@ -492,7 +492,7 @@ class RCS(dspy.Module):
             for question in questions:
                 # Trigger situation, await for user response
                 self.state.situation = {"type": "question", "parent": self.state.current.title, "question": question}
-                log_internal_event(f"[SITUATION] {self.state.situation}")
+                log_internal_event(f"[SITUATION] {json.dumps(self.state.situation, indent=4)}")
                 await self.state.event.wait()
                 self.state.situation = {}      # clear situation so backend knows
                 answer = self.state.resolution

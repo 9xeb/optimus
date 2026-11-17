@@ -65,7 +65,7 @@ async def update_task(task: TaskPayload):
     """Override dependencies and tip for a task"""
     result = optimus.graft(task=task.task, deps=task.dependencies)
     if task.tip:
-        optimus.grow(task=task.task, examples=[task.tip])
+        optimus.grow(task=task.task, new_examples=[task.tip])
     if result is not None:
         raise HTTPException(status_code=404, detail=result)
 
@@ -154,9 +154,9 @@ async def review_situation(review: dict):
         await cancel_tasks()
         # await optimus.stop()
         # 2. Refine root task
-        optimus.grow(task=optimus.state.parent.title, examples=[review.get("review")])
+        optimus.grow(task=root_task, new_examples=[review.get("review")])
         # 3. Re-run task
-        return run_task(name=root_task)
+        return await run_task(name=root_task)
         # optimus.state.tasks[optimus.state.parent.title]["tips"] += [
         #     review.get("review")
         # ]
@@ -176,4 +176,4 @@ async def review_situation(review: dict):
 # ):
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, access_log=False)

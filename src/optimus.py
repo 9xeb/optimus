@@ -5,6 +5,7 @@ import os
 import time
 from pathlib import Path
 
+import httpx2
 import numpy
 import dspy
 import mlflow
@@ -81,178 +82,185 @@ class Optimus():
         This is the section that retrieves and wraps MCP tools around approval gates
         """
         try:
-            async with streamable_http_client(os.environ["MCP_GATEWAY"]) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    tools = await session.list_tools()
+            async with httpx2.AsyncClient(
+                headers={
+                    "Authorization": f"Bearer {os.environ["MCP_TOKEN"]}"
+                } if os.environ.get("MCP_TOKEN") else None,
+                follow_redirects=True,
+            ) as http_client:
+                async with streamable_http_client(os.environ["MCP_GATEWAY"], http_client=http_client) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        tools = await session.list_tools()
 
-                    mcp_tools = [
-                        dspy.Tool.from_mcp_tool(session, tool)
-                        for tool in tools.tools
-                        if tool.name != "sandbox_execute_code" # hide problematic tool
-                    ]
+                        mcp_tools = [
+                            dspy.Tool.from_mcp_tool(session, tool)
+                            for tool in tools.tools
+                            if tool.name != "sandbox_execute_code" # hide problematic tool
+                        ]
 
-                    gated_mcp_tools = [
-                        dspy.Tool(
-                            require_approval(self.state, tool.func, tool.name),
-                            name=tool.name,
-                            desc=tool.desc,
-                            args=tool.args,
-                            arg_types=tool.arg_types
-                        )
-                        for tool in mcp_tools
-                    ]
-
-                    # Tools have .name, .desc that can be used for discovery
-                    log_internal_event(f"MCP TOOLS: {[tool.name for tool in mcp_tools]}")
-
-                    async def list_tools():
-                        """Get the list of available tools."""
-                        update_action_metrics(state=self.state, action_count=1)
-                        list_of_tools = [
-                            {
-                                "name": tool.name,
-                                "args": list(tool.args.keys())
-                            }
+                        gated_mcp_tools = [
+                            dspy.Tool(
+                                require_approval(self.state, tool.func, tool.name),
+                                name=tool.name,
+                                desc=tool.desc,
+                                args=tool.args,
+                                arg_types=tool.arg_types
+                            )
                             for tool in mcp_tools
-                        ] + [{"reminder": "Remember to wrap tools around `run_tools`."}]
-                        log_internal_event(f"[OPTIMUS] Listing tools: {list_of_tools}")
-                        await self.state.actions.put({"task": self.state.current.title, "data": "Listing tools..."})
-                        return list_of_tools
-                    async def describe_tools(names: list[str]):
-                        """Get descriptions of the most promising tools, by tool name."""
-                        update_action_metrics(state=self.state, action_count=1)
-                        match = [tool for tool in mcp_tools if tool.name in names]
-                        log_internal_event(f"[OPTIMUS] Discovered tools: {match}")
-                        # await self.state.actions.put({"task": self.state.current.title, "data": "Describing tools..."})
-                        self.state.discovered_tools += names
-                        return match
-                    @dataclass
-                    class ToolCall:
-                        """Tool call payload"""
-                        goal: str = field(metadata={"description": "What the call is meant to achieve."})
-                        change: bool = field(metadata={"description": "True if the call makes a potentially breaking change. False otherwise."})
-                        name: str
-                        args: dict
-                        # readonly: bool = field(metadata={"description": "True if the call is a read only operation. False otherwise."})
-                        # affects_user: bool = field(metadata={"description": "True if the call makes changes to the property of the user. False otherwise."})
-                        # requires_approval: bool = field(metadata={"description": "True if the user should approve this call first. False otherwise."})
-                    async def run_tools(calls: list[ToolCall]):
-                        """
-                        Run a list of tools by name.
-                        When iterating, submit the single largest list of calls possible.
-                        """
-                        update_action_metrics(state=self.state, action_count=len(calls))
+                        ]
 
-                        # # # # # Before any next tool call, let LLM observe mid-task tips once
-                        # # # # if len(self.state.tasks[self.state.current.title]["tips"]) > 0:
-                        # # # #     # Propagate tips upwards
-                        # # # #     self.state.tasks[self.state.parent.title]["tips"] += self.state.tasks[self.state.current.title]["tips"]
-                        # # # #     output = f"Before you proceed, the user provided the following tips: {self.state.tasks[self.state.parent.title]["tips"]}."
-                        # # # #     log_internal_event(f"[OPTIMUS] Some tips were found. {output}")
-                        # # # #     # Consume local tips
-                        # # # #     self.state.tasks[self.state.current.title]["tips"] = []
-                        # # # #     return output
+                        # Tools have .name, .desc that can be used for discovery
+                        log_internal_event(f"MCP TOOLS: {[tool.name for tool in mcp_tools]}")
 
-                        # Split as many tool calls as possible in multiple items in the call list.
-                        # Split repetitive or looping operations into multiple items in the calls list.
-                        list_flag = False   # track if tools already listed to avoid spam in the same batch
-                        output = []
-                        for call in calls:
-                            log_internal_event(f"[OPTIMUS] Trying to call tool {call}")
-                            log_internal_event(f"[OPTIMUS] Discovered tools: {self.state.discovered_tools}")
-                            try:
-                                # 1. Find matching tools by name (and their approval-gated counterparts)
-                                match = [tool for tool in mcp_tools if tool.name == call.name]
-                                gated_match = [tool for tool in gated_mcp_tools if tool.name == call.name]
-                                if len(match) > 0:
-                                    # Run the first maching tool
-                                    # Check if all args exist in signature
-                                    if all([arg in list(match[0].args.keys()) for arg in list(call.args.keys())]):
-                                        # Stream call goal
-                                        await self.state.actions.put({"task": self.state.current.title, "data": call.goal})
-                                        if not call.change:
-                                            # Direct call if read only and previously reviewed task
-                                            log_internal_event(f"[OPTIMUS] Tool call [{call.name}] advertised as read-only.")
-                                            # Await calls so it works both for async and sync
-                                            tool_output = await match[0].acall(**call.args)
-                                            # Add to trajectory without approval
-                                            # self.state.trajectory += [call.goal]
-                                            self.state.tasks[self.state.parent.title]["trajectory"] += [call.goal]
-                                            self.state.tasks[self.state.current.title]["trajectory"] += [call.goal]
+                        async def list_tools():
+                            """Get the list of available tools."""
+                            update_action_metrics(state=self.state, action_count=1)
+                            list_of_tools = [
+                                {
+                                    "name": tool.name,
+                                    "args": list(tool.args.keys())
+                                }
+                                for tool in mcp_tools
+                            ] + [{"reminder": "Remember to wrap tools around `run_tools`."}]
+                            log_internal_event(f"[OPTIMUS] Listing tools: {list_of_tools}")
+                            await self.state.actions.put({"task": self.state.current.title, "data": "Listing tools..."})
+                            return list_of_tools
+                        async def describe_tools(names: list[str]):
+                            """Get descriptions of the most promising tools, by tool name."""
+                            update_action_metrics(state=self.state, action_count=1)
+                            match = [tool for tool in mcp_tools if tool.name in names]
+                            log_internal_event(f"[OPTIMUS] Discovered tools: {match}")
+                            # await self.state.actions.put({"task": self.state.current.title, "data": "Describing tools..."})
+                            self.state.discovered_tools += names
+                            return match
+                        @dataclass
+                        class ToolCall:
+                            """Tool call payload"""
+                            goal: str = field(metadata={"description": "What the call is meant to achieve."})
+                            # change: bool = field(metadata={"description": "True if the call makes a potentially breaking change. False otherwise."})
+                            risk: bool = field(metadata={"description": "True if the call is risky. False otherwise."})
+                            name: str
+                            args: dict
+                            # readonly: bool = field(metadata={"description": "True if the call is a read only operation. False otherwise."})
+                            # affects_user: bool = field(metadata={"description": "True if the call makes changes to the property of the user. False otherwise."})
+                            # requires_approval: bool = field(metadata={"description": "True if the user should approve this call first. False otherwise."})
+                        async def run_tools(calls: list[ToolCall]):
+                            """
+                            Run a list of tools by name.
+                            When iterating, submit the single largest list of calls possible.
+                            """
+                            update_action_metrics(state=self.state, action_count=len(calls))
+
+                            # # # # # Before any next tool call, let LLM observe mid-task tips once
+                            # # # # if len(self.state.tasks[self.state.current.title]["tips"]) > 0:
+                            # # # #     # Propagate tips upwards
+                            # # # #     self.state.tasks[self.state.parent.title]["tips"] += self.state.tasks[self.state.current.title]["tips"]
+                            # # # #     output = f"Before you proceed, the user provided the following tips: {self.state.tasks[self.state.parent.title]["tips"]}."
+                            # # # #     log_internal_event(f"[OPTIMUS] Some tips were found. {output}")
+                            # # # #     # Consume local tips
+                            # # # #     self.state.tasks[self.state.current.title]["tips"] = []
+                            # # # #     return output
+
+                            # Split as many tool calls as possible in multiple items in the call list.
+                            # Split repetitive or looping operations into multiple items in the calls list.
+                            list_flag = False   # track if tools already listed to avoid spam in the same batch
+                            output = []
+                            for call in calls:
+                                log_internal_event(f"[OPTIMUS] Trying to call tool {call}")
+                                log_internal_event(f"[OPTIMUS] Discovered tools: {self.state.discovered_tools}")
+                                try:
+                                    # 1. Find matching tools by name (and their approval-gated counterparts)
+                                    match = [tool for tool in mcp_tools if tool.name == call.name]
+                                    gated_match = [tool for tool in gated_mcp_tools if tool.name == call.name]
+                                    if len(match) > 0:
+                                        # Run the first maching tool
+                                        # Check if all args exist in signature
+                                        if all([arg in list(match[0].args.keys()) for arg in list(call.args.keys())]):
+                                            # Stream call goal
+                                            await self.state.actions.put({"task": self.state.current.title, "data": call.goal})
+                                            if not call.risk:
+                                                # Direct call if read only and previously reviewed task
+                                                log_internal_event(f"[OPTIMUS] Tool call [{call.name}] advertised as read-only.")
+                                                # Await calls so it works both for async and sync
+                                                tool_output = await match[0].acall(**call.args)
+                                                # Add to trajectory without approval
+                                                # self.state.trajectory += [call.goal]
+                                                self.state.tasks[self.state.parent.title]["trajectory"] += [call.goal]
+                                                self.state.tasks[self.state.current.title]["trajectory"] += [call.goal]
+                                            else:
+                                                # Wait for user approval
+                                                log_internal_event(f"[OPTIMUS] Tool call [{call.name}] advertised as a change. Requiring approval.")
+                                                self.state.justification = call.goal  # register the justification for user interface
+                                                tool_output = await gated_match[0].acall(**call.args)
+                                            log_internal_event(f"[OPTIMUS] Tool [{call.name}] output -> {tool_output[:50]}...")
+
+                                            # Update tool discovery with piggybacking
+                                            if call.name in self.state.discovered_tools:
+                                                log_internal_event(f"[OPTIMUS] [{call.name}] tool already discovered. Skipping piggybacking.")
+                                                output += [{"call": {"name": call.name, "args": call.args}, "output": tool_output}]
+                                            else:
+                                                log_internal_event(f"[OPTIMUS] Piggybacking [{call.name}] description after running for the first time in this session.")
+                                                output += [
+                                                    {
+                                                        "call": {"name": call.name, "args": call.args},
+                                                        "signature": await describe_tools([call.name]),
+                                                        "output": tool_output
+                                                    }
+                                                ]
                                         else:
-                                            # Wait for user approval
-                                            log_internal_event(f"[OPTIMUS] Tool call [{call.name}] advertised as a change. Requiring approval.")
-                                            self.state.justification = call.goal  # register the justification for user interface
-                                            tool_output = await gated_match[0].acall(**call.args)
-                                        log_internal_event(f"[OPTIMUS] Tool [{call.name}] output -> {tool_output[:50]}...")
-
-                                        # Update tool discovery with piggybacking
-                                        if call.name in self.state.discovered_tools:
-                                            log_internal_event(f"[OPTIMUS] [{call.name}] tool already discovered. Skipping piggybacking.")
-                                            output += [{"call": {"name": call.name, "args": call.args}, "output": tool_output}]
-                                        else:
-                                            log_internal_event(f"[OPTIMUS] Piggybacking [{call.name}] description after running for the first time in this session.")
+                                            # Get here if LLM gave broken args
+                                            log_internal_event(f"[OPTIMUS] Tool call [{call.name}] violates signature")
                                             output += [
                                                 {
                                                     "call": {"name": call.name, "args": call.args},
-                                                    "signature": await describe_tools([call.name]),
-                                                    "output": tool_output
+                                                    "error": f"Error: wrong arguments for tool {call.name}. Either you are calling the wrong tool or you are providing the wrong arguments.",
+                                                    # "signature": describe_tools([call.name]),
                                                 }
                                             ]
                                     else:
-                                        # Get here if LLM gave broken args
-                                        log_internal_event(f"[OPTIMUS] Tool call [{call.name}] violates signature")
+                                        # Get here if LLM gave broken tool name
                                         output += [
                                             {
                                                 "call": {"name": call.name, "args": call.args},
-                                                "error": f"Error: wrong arguments for tool {call.name}. Either you are calling the wrong tool or you are providing the wrong arguments.",
-                                                # "signature": describe_tools([call.name]),
-                                            }
+                                                "error": f"Error, tool name {call.name} does not exist."
+                                            } | {"available_tools": await list_tools()} if not list_flag else {}
                                         ]
-                                else:
-                                    # Get here if LLM gave broken tool name
+                                        list_flag = True
+                                except Exception as e:
+                                    # Land any unexpected exceptions here for the LLM to observe
+                                    log_error(f"[OPTIMUS] Critical dynamic tool call error: {e}")
                                     output += [
                                         {
                                             "call": {"name": call.name, "args": call.args},
-                                            "error": f"Error, tool name {call.name} does not exist."
-                                        } | {"available_tools": await list_tools()} if not list_flag else {}
+                                            "signature": await describe_tools([call.name]) if call.name in self.state.discovered_tools else f"See previous {call.name} description.",
+                                            "error": e
+                                        }
                                     ]
-                                    list_flag = True
-                            except Exception as e:
-                                # Land any unexpected exceptions here for the LLM to observe
-                                log_error(f"[OPTIMUS] Critical dynamic tool call error: {e}")
-                                output += [
-                                    {
-                                        "call": {"name": call.name, "args": call.args},
-                                        "signature": await describe_tools([call.name]) if call.name in self.state.discovered_tools else f"See previous {call.name} description.",
-                                        "error": e
-                                    }
-                                ]
 
-                        log_internal_event(f"[OPTIMUS] Current trajectory: {self.state.tasks[self.state.parent.title]["trajectory"]}")
-                        # LLM observes good calls and bad calls
-                        # output += [{"reminder": "Always follow up "}]
-                        return output
-                        
-                    dynamic_tools = [
-                        dspy.Tool(list_tools),
-                        dspy.Tool(describe_tools),
-                        dspy.Tool(run_tools)
-                    ]
-                    log_internal_event(f"[OPTIMUS] Dynamic tools: {dynamic_tools}")
+                            log_internal_event(f"[OPTIMUS] Current trajectory: {self.state.tasks[self.state.parent.title]["trajectory"]}")
+                            # LLM observes good calls and bad calls
+                            # output += [{"reminder": "Always follow up "}]
+                            return output
 
-                    # Refine the task with all known examples
-                    self.grow(task=task, examples=self.build_examples(task=task))
-                    # This is the entrypoint of the repeated context segmentation
-                    agent = RCS(
-                        state=self.state,
-                        tools=dynamic_tools,
-                        info={}
-                    )
+                        dynamic_tools = [
+                            dspy.Tool(list_tools),
+                            dspy.Tool(describe_tools),
+                            dspy.Tool(run_tools)
+                        ]
+                        log_internal_event(f"[OPTIMUS] Dynamic tools: {dynamic_tools}")
 
-                    # Starts the async RCS task
-                    agent_task = await agent.acall(task=task)
+                        # Refine the task with all known examples
+                        # self.grow(task=task, new_examples=[])
+                        # This is the entrypoint of the repeated context segmentation
+                        agent = RCS(
+                            state=self.state,
+                            tools=dynamic_tools,
+                            info={}
+                        )
+
+                        # Starts the async RCS task
+                        agent_task = await agent.acall(task=task)
         except* Exception as eg:
             if isinstance(eg, BaseExceptionGroup):
                 for e in eg.exceptions:
@@ -267,22 +275,24 @@ class Optimus():
                     task["state"] = "failing"
             raise e
 
-    def grow(self, task: str, examples: list):
+    def grow(self, task: str, new_examples: list):
         """Refine the given task's instruction using the available examples"""
         if task not in list(self.state.tasks.keys()):
             log_internal_event(f"[OPTIMUS] Unable to refine non-existing task [{task}]")
             return f"Task [{task}] does not exist."
 
-        if len(examples) > 0:
+        if len(new_examples) > 0:
             self.state.tasks[task]["state"] = "consolidating"
-            log_internal_event(f"[OPTIMUS] Refining [{task}] with {examples}.")
+            self.state.tasks[task]["examples"] += new_examples
+            log_internal_event(f"[OPTIMUS] Refining [{task}] with {json.dumps(self.state.tasks[task]["examples"], indent=4)}.")
             merge = dspy.ChainOfThought("old_task, updates -> updated_task")
-            merging = merge(old_task=task, updates=examples)
+            merging = merge(old_task=task, updates=self.build_examples(task))
             log_internal_event(f"[OPTIMUS] Refined [{task}] is now [{merging.updated_task}]")
 
             self.state.tasks[task]["task"] = merging.updated_task      # override task's prompt
             self.state.tasks[task]["state"] = "sleeping"
-            self.state.tasks[task]["examples"] += examples
+        else:
+            log_internal_event(f"[OPTIMUS] Nothing to grow for [{task}]")
         # self.state.tasks[task]["examples"] = [] # consume examples
 
 
@@ -355,10 +365,8 @@ class Optimus():
     def build_examples(self, task: str):
         """Rebuild info for refining task's prompt"""
         log_internal_event(f"Rebuilding training examples for [{task}]")
-        info = [
-            self.state.tasks[task]["qna"] +
-            self.state.tasks[task]["examples"] +
-            self.state.tasks[task]["tips"]
+        info = self.state.tasks[task]["examples"]
+            # self.state.tasks[task]["tips"]
             # {
             #     "examples": (
             #         self.state.tasks[task]["qna"] +
@@ -366,5 +374,5 @@ class Optimus():
             #         self.state.tasks[task]["tips"]
             #     )
             # }
-        ]
+
         return info
